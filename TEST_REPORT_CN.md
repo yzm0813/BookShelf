@@ -7,7 +7,7 @@
 | 插件文件与 Lua 5.1 加载语法 | 通过 | 全部 Lua 文件由 `luaparse` 以 Lua 5.1 模式解析 |
 | 创建、重命名、删除、排序分类 | 通过 | 数据模型执行测试；删除分类后原文件存在性不变 |
 | 同书多分类、重复路径、加入/移出、分类内排序 | 通过 | `tests/store_spec.lua`，17 项断言 |
-| 打开书籍并沿用原阅读数据 | 接口通过 | 调用 2026.07.1 的 `filemanagerutil.openFile(ui, original_path, nil, true)`；未创建副本或新阅读记录路径 |
+| 打开书籍并沿用原阅读数据 | 接口通过 | 按 2026.07.1 标准顺序执行 `SetupShowReader → 关闭书架 Grid → nextTick → filemanagerutil.openFile`；未创建副本或新阅读记录路径 |
 | 阅读进度 | 接口通过 | 读取 2026.07.1 的 `BookList.getBookInfo(path)`；未开始隐藏，完成显示 100% |
 | 横竖屏切换 | 静态通过 | 每次布局读取 `Screen:getWidth()/getHeight()`，列数分别持久化，尺寸经 `Screen:scaleBySize()` 计算 |
 | 封面百分比、比例、裁剪、间距、圆角、行数 | 通过 | 设置路径独立；更新时调用当前 Grid 的 `refreshLayout()`；缓存键 7 项失效检查通过 |

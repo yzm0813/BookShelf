@@ -2,6 +2,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local DocumentRegistry = require("document/documentregistry")
+local Event = require("ui/event")
 local FontChooser = require("ui/widget/fontchooser")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
@@ -170,16 +171,33 @@ function Bookshelf:onGridSelect(grid, entry)
         self:_closeGrid(grid, true)
         self:showUncategorized()
     elseif entry.kind == "book" then
+        if self._opening_book then return end
         if lfs.attributes(entry.path, "mode") ~= "file" then
             self:_info(_("This book file is unavailable. Its bookshelf record was not deleted."))
             return
         end
+
+        -- KOReader expects custom full-screen menus to prepare the current UI
+        -- before they close and hand control to ReaderUI. In particular,
+        -- Simple UI listens for SetupShowReader and tears down its screen state
+        -- in the right order. Opening synchronously from the tap handler can
+        -- otherwise race the menu close/refresh path.
+        local book_path = entry.path
+        self._opening_book = true
+        UIManager:broadcastEvent(Event:new("SetupShowReader"))
         self:_closeGrid(grid, true)
-        local ok, err = pcall(filemanagerutil.openFile, self.ui, entry.path, nil, true)
-        if not ok then
-            logger.err("Bookshelf: failed to open original book:", entry.path, err)
-            self:_info(_("Unable to open the original book file."))
-        end
+        UIManager:nextTick(function()
+            local ok, err = pcall(filemanagerutil.openFile, self.ui, book_path, nil, true)
+            self._opening_book = nil
+            if not ok then
+                -- SetupShowReader only marks FileManager as tearing down. If
+                -- opening fails before ShowingReader closes it, make the
+                -- existing FileManager usable again and report the error.
+                if self.ui then self.ui.tearing_down = nil end
+                logger.err("Bookshelf: failed to open original book:", book_path, err)
+                self:_info(_("Unable to open the original book file."))
+            end
+        end)
     end
 end
 

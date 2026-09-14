@@ -347,6 +347,8 @@ function Grid:onMenuHold(entry)
 end
 
 function Grid:onCloseWidget()
+    if self._bookshelf_close_done then return end
+    self._bookshelf_close_done = true
     self._closed = true
     if self.extract_action then UIManager:unschedule(self.extract_action) self.extract_action = nil end
     if self.plugin.active_grid == self then self.plugin.active_grid = nil end
