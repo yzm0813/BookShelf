@@ -12,7 +12,6 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local util = require("util")
 local _ = require("bookshelf_i18n")
 
 local CoverCache = require("bookshelf_covercache")
@@ -27,7 +26,7 @@ local Bookshelf = WidgetContainer:extend{
 
 local function basename(path)
     local name = path and path:match("([^/]+)$") or ""
-    return util.splitFileNameType(name)
+    return filemanagerutil.splitFileNameType(name)
 end
 
 function Bookshelf:init()

@@ -1,6 +1,6 @@
 # BookShelf for KOReader
 
-2026-09-14：修复从书架卡片打开书籍时，与 Simple UI/KOReader 阅读器启动流程之间的界面关闭顺序冲突。
+2026-09-14：修复点击“未分类书籍”时的文件名解析异常，以及从书架卡片打开书籍时与 Simple UI/KOReader 阅读器启动流程之间的界面关闭顺序冲突。
 
 一个面向 KOReader 2026.07.1 的独立虚拟封面书架插件。分类仅保存电子书原路径与排序信息，同一本书可以加入多个分类；插件不会移动或删除电子书，也不会覆盖 FileChooser、FileManager、Simple UI 或 CoverBrowser 的方法和设置。
 

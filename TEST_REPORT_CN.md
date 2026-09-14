@@ -14,6 +14,7 @@
 | 字体缺失 | 通过 | `FontChooser.isFontRegistered()` 校验，失败回退 `Font:getFace("cfont", size)` |
 | 文件路径失效与暂时卸载存储 | 通过 | 失效记录可显示/隐藏；书库根不可用时清理拒绝执行；根外路径保守保留 |
 | 未分类扫描 | 通过 | `tests/scanner_spec.lua` 覆盖递归、格式过滤、`.sdr/cache` 排除及已分类过滤 |
+| 未分类列表文件名解析 | 通过 | 使用 2026.07.1 的 `filemanagerutil.splitFileNameType`；静态回归检查禁止调用不存在的 `util.splitFileNameType` |
 | 与 Simple UI、CoverBrowser 同时启用 | 静态兼容通过 | 扫描确认没有目标类方法赋值、没有对方设置键写入；注册键互不相同 |
 | 禁用恢复 | 通过 | `stopPlugin/onTeardown` 关闭活动 Grid、取消缩略图任务、移除 `bookshelf_add_to_shelf`、只刷新私有设置 |
 

@@ -23,9 +23,9 @@ local UIManager = require("ui/uimanager")
 local UnderlineContainer = require("ui/widget/container/underlinecontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
-local util = require("util")
 
 local Screen = Device.screen
 
@@ -298,7 +298,7 @@ function Grid:_startExtraction()
             local ok, props = pcall(bookinfo.getDocProps, bookinfo, job.path)
             if ok and props then metadata.title, metadata.authors = props.display_title or props.title, props.authors end
         end
-        metadata.title = metadata.title or util.splitFileNameType(job.path:match("([^/]+)$"))
+        metadata.title = metadata.title or filemanagerutil.splitFileNameType(job.path:match("([^/]+)$"))
         local output, reason, cover_ratio = self.cache:generate(job.path, job.spec)
         metadata.cover_missing = not output
         metadata.cover_ratio = cover_ratio
