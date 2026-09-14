@@ -1,0 +1,8 @@
+# KOReader runtime data is stored outside the plugin, but keep accidental
+# local test/runtime artifacts out of source control.
+*.old
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+cache/
