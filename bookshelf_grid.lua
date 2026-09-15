@@ -34,6 +34,15 @@ local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
 local plugin_dir = source_path:match("^(.*)[/\\]bookshelf_grid%.lua$") or "."
 local SORT_ICON = plugin_dir .. "/icons/sort.svg"
 
+local function badgePalette(style)
+    if style == "white" then
+        return Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_BLACK
+    elseif style == "black" then
+        return Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_LIGHT_GRAY, Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_DARK_GRAY
+end
+
 -- FrameContainer paints its border before its child. On cover images that can
 -- let the child overwrite anti-aliased corner pixels. CoverFrame deliberately
 -- paints background, inset content, then the border as the final layer.
@@ -86,6 +95,8 @@ local RibbonBadge = WidgetContainer:extend{
     bordersize = 1,
     background = Blitbuffer.COLOR_BLACK,
     color = Blitbuffer.COLOR_BLACK,
+    style_settings = nil,
+    text_widget = nil,
 }
 
 function RibbonBadge:getSize()
@@ -114,6 +125,16 @@ local function paintRibbonShape(bb, x, y, width, height, body_height, radius, co
 end
 
 function RibbonBadge:paintTo(bb, x, y)
+    -- Settings can be changed while KOReader's main menu is covering this
+    -- grid. Resolve the palette at paint time so the restored underlying
+    -- page never reuses the colors captured by an older badge instance.
+    if self.style_settings then
+        local background, foreground, border_color =
+            badgePalette(self.style_settings.progress_badge_background)
+        self.background = background
+        self.color = border_color
+        if self.text_widget then self.text_widget.fgcolor = foreground end
+    end
     self.dimen = self.dimen or Geom:new{}
     self.dimen.x, self.dimen.y = x, y
     self.dimen.w, self.dimen.h = self.width, self.height
@@ -244,20 +265,7 @@ end
 function Card:_progressBadge(percent, w, h, top_offset)
     if percent == nil then return nil end
     local style = self.menu.settings.progress_badge_background or "gray"
-    local background, foreground, border_color
-    if style == "white" then
-        background = Blitbuffer.COLOR_WHITE
-        foreground = Blitbuffer.COLOR_BLACK
-        border_color = Blitbuffer.COLOR_BLACK
-    elseif style == "black" then
-        background = Blitbuffer.COLOR_BLACK
-        foreground = Blitbuffer.COLOR_WHITE
-        border_color = Blitbuffer.COLOR_BLACK
-    else
-        background = Blitbuffer.COLOR_LIGHT_GRAY
-        foreground = Blitbuffer.COLOR_BLACK
-        border_color = Blitbuffer.COLOR_DARK_GRAY
-    end
+    local background, foreground, border_color = badgePalette(style)
     -- The approved 50 x 45 mock-up maps to a 240 px cover. Keep those
     -- proportions on every screen and orientation instead of fixing pixels.
     local badge_w = math.max(Screen:scaleBySize(20), math.floor(w * 5 / 24 + 0.5))
@@ -285,6 +293,8 @@ function Card:_progressBadge(percent, w, h, top_offset)
         color = border_color,
         radius = math.max(1, math.floor(badge_w * 0.14 + 0.5)),
         background = background,
+        style_settings = self.menu.settings,
+        text_widget = text,
         fixed_text,
     }
     local center_x = math.floor(w * 0.8 + 0.5)

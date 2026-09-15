@@ -671,6 +671,12 @@ end
 function Bookshelf:_set(path, value)
     self.store:updateSetting(path, value)
     self:_refreshActiveGrid()
+    if path[1] == "progress_badge_background" then
+        -- The KOReader main menu may cover the bookshelf while this setting
+        -- changes. Mark every stacked widget dirty so closing/collapsing the
+        -- menu reveals the newly painted palette instead of its saved underlay.
+        UIManager:setDirty("all", "ui")
+    end
 end
 
 function Bookshelf:_spinItem(label, path, min, max, default, suffix)
