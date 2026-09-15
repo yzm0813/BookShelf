@@ -1,5 +1,6 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local BookList = require("ui/widget/booklist")
+local BottomContainer = require("ui/widget/container/bottomcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
@@ -55,15 +56,16 @@ function CoverFrame:paintTo(bb, x, y)
         Blitbuffer.COLOR_BLACK, self.radius, G_reader_settings:nilOrTrue("anti_alias_ui"))
 end
 
--- Category covers reserve a small strip above the real cover for four
+-- Category covers reserve a small strip above the real cover for three
 -- perspective "book page" lines. The farthest line is shortest and every
 -- following line grows toward the foreground cover.
 local CategoryCover = WidgetContainer:extend{
     width = 1,
     height = 1,
     stack_height = 0,
-    line_count = 4,
+    line_count = 3,
     line_thickness = 1,
+    line_gap = 1,
 }
 
 function CategoryCover:getSize()
@@ -74,8 +76,7 @@ function CategoryCover:paintTo(bb, x, y)
     self.dimen = self.dimen or Geom:new{}
     self.dimen.x, self.dimen.y = x, y
     self.dimen.w, self.dimen.h = self.width, self.height
-    local step = self.line_count > 1
-        and math.floor((self.stack_height - self.line_thickness) / (self.line_count - 1)) or 0
+    local step = self.line_thickness + self.line_gap
     local max_inset = math.floor(self.width * 0.18)
     local min_inset = math.max(self.line_thickness, math.floor(self.width * 0.05))
     for i = 1, self.line_count do
@@ -168,7 +169,7 @@ function Card:_fakeCover(w, h, text, missing, radius, border)
     }
 end
 
-function Card:_progressBadge(percent, w, h)
+function Card:_progressBadge(percent, w, h, top_offset)
     if percent == nil then return nil end
     local text = TextWidget:new{
         text = string.format("%d%%", math.max(0, math.min(100, math.floor(percent * 100 + 0.5)))),
@@ -185,7 +186,13 @@ function Card:_progressBadge(percent, w, h)
     }
     return RightContainer:new{
         dimen = Geom:new{ w = w, h = h },
-        TopContainer:new{ dimen = Geom:new{ w = badge:getSize().w, h = h }, badge },
+        TopContainer:new{
+            dimen = Geom:new{ w = badge:getSize().w, h = h },
+            VerticalGroup:new{
+                VerticalSpan:new{ width = top_offset or 0 },
+                badge,
+            },
+        },
     }
 end
 
@@ -203,13 +210,18 @@ function Card:_build()
     -- The second text row is permanent: it contains a grey category book
     -- count, a grey author, or an empty placeholder when authors are hidden.
     local author_slot_h = textHeight(settings.author)
-    local text_gap = Screen:scaleBySize(2)
+    local cover_text_gap = Screen:scaleBySize(2)
+    local metadata_gap = math.max(1, Size.margin.tiny)
     local cover_area_h = math.max(Screen:scaleBySize(20),
-        self.height - title_slot_h - author_slot_h - 2 * text_gap)
-    local stack_line_count = 4
+        self.height - title_slot_h - author_slot_h - cover_text_gap - metadata_gap)
+    local stack_line_count = 3
     local stack_line_thickness = math.max(1, Size.line.medium)
-    local stack_height = category_like and math.max(stack_line_count * stack_line_thickness,
-        math.floor(Screen:scaleBySize(12) * settings.cover_scale_percent / 100)) or 0
+    local stack_line_gap = math.max(1,
+        math.floor(Screen:scaleBySize(2) * settings.cover_scale_percent / 100))
+    -- Reserve the same stack strip on every card. Category cards fill it with
+    -- perspective lines while book cards leave it blank, so both cover bodies
+    -- are calculated from exactly the same area and start on the same baseline.
+    local stack_height = stack_line_count * (stack_line_thickness + stack_line_gap)
     local cover_w, cover_h = self:_coverDimensions(
         math.max(1, cover_area_h - stack_height), metadata)
     local radius = math.min(Screen:scaleBySize(settings.corner_radius), math.floor(math.min(cover_w, cover_h) / 2))
@@ -247,22 +259,20 @@ function Card:_build()
             elseif info.percent_finished and info.percent_finished > 0 then progress = info.percent_finished end
         end
     end
-    local visual_h = cover_h
-    if category_like then
-        visual_h = cover_h + stack_height
-        visual = CategoryCover:new{
-            width = cover_w,
-            height = visual_h,
-            stack_height = stack_height,
-            line_count = stack_line_count,
-            line_thickness = stack_line_thickness,
-            visual,
-        }
-    end
+    local visual_h = cover_h + stack_height
+    visual = CategoryCover:new{
+        width = cover_w,
+        height = visual_h,
+        stack_height = stack_height,
+        line_count = category_like and stack_line_count or 0,
+        line_thickness = stack_line_thickness,
+        line_gap = stack_line_gap,
+        visual,
+    }
     local cover = OverlapGroup:new{
         dimen = Geom:new{ w = cover_w, h = visual_h },
         visual,
-        not category_like and self:_progressBadge(progress, cover_w, visual_h) or nil,
+        not category_like and self:_progressBadge(progress, cover_w, visual_h, stack_height) or nil,
     }
 
     local text_w = math.max(1, self.width - 2 * Screen:scaleBySize(2))
@@ -271,13 +281,14 @@ function Card:_build()
         dimen = Geom:new{ w = self.width, h = cover_area_h },
         CenterContainer:new{ dimen = Geom:new{ w = self.width, h = visual_h }, cover },
     })
-    table.insert(group, VerticalSpan:new{ width = text_gap })
+    table.insert(group, VerticalSpan:new{ width = cover_text_gap })
     local display_title = category_like and entry.name
         or (metadata and metadata.title or entry.name)
-    table.insert(group, CenterContainer:new{
+    table.insert(group, BottomContainer:new{
         dimen = Geom:new{ w = self.width, h = title_slot_h },
         makeText(display_title, title_cfg, text_w, category_like),
     })
+    table.insert(group, VerticalSpan:new{ width = metadata_gap })
     local secondary_text
     if category_like then
         secondary_text = string.format(_("%d books"), entry.book_count or 0)
@@ -286,7 +297,7 @@ function Card:_build()
     else
         secondary_text = ""
     end
-    table.insert(group, CenterContainer:new{
+    table.insert(group, TopContainer:new{
         dimen = Geom:new{ w = self.width, h = author_slot_h },
         makeText(secondary_text, settings.author, text_w, false,
             Blitbuffer.COLOR_DARK_GRAY),
