@@ -75,6 +75,10 @@ for _, entry in ipairs(entries) do
 end
 
 local registered, unregistered
+local simpleui_actions = {}
+package.preload["infra/sui_config"] = function()
+    return { ALL_ACTIONS = simpleui_actions }
+end
 local QA = {
     register = function(desc) registered = desc end,
     unregister = function(id) unregistered = id end,
@@ -94,6 +98,8 @@ assert(registered.id == "bookshelf_open")
 assert(registered.label == "Bookshelf")
 assert(registered.is_in_place == false)
 assert(type(registered.execute) == "function")
+assert(#simpleui_actions == 1 and simpleui_actions[1].id == "bookshelf_open",
+    "external bookshelf action must appear in Simple UI's icon picker catalogue")
 assert(bi_registered.id == "bookshelf_grid_nav")
 assert(bi_registered.widget_name == "bookshelf_grid")
 assert(bi_registered.active_action_id == "bookshelf_open")
@@ -103,5 +109,6 @@ assert(live_simpleui.active_action == "bookshelf_open",
 shelf:stopPlugin()
 assert(unregistered == "bookshelf_open", "Simple UI action must be removed on plugin stop")
 assert(bi_unregistered == "bookshelf_grid_nav", "Simple UI page registration must be removed")
+assert(#simpleui_actions == 0, "Simple UI icon picker catalogue entry must be removed on stop")
 
 print("PASS main_spec: flat root, prepaint tab activation, and Simple UI lifecycle")

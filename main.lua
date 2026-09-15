@@ -93,6 +93,7 @@ function Bookshelf:_registerSimpleUIAction()
             plugin:showRoot()
         end,
     }
+    self:_exposeSimpleUIIconPicker()
     self._simpleui_qa = QA
     local Core = package.loaded["infra/sui_core"]
     if not Core then
@@ -110,6 +111,44 @@ function Bookshelf:_registerSimpleUIAction()
     end
     logger.info("Bookshelf: registered Simple UI bottom-bar candidate", SIMPLEUI_ACTION_ID)
     return true
+end
+
+-- Simple UI 2026.07.1 keeps external actions in QA's runtime registry, but
+-- its icon settings page still builds the editable action list from
+-- Config.ALL_ACTIONS. Add only a runtime catalogue entry (never a setting or
+-- source-file change), and remove that exact entry when Bookshelf stops.
+function Bookshelf:_exposeSimpleUIIconPicker()
+    local ok, Config = pcall(require, "infra/sui_config")
+    if not ok or type(Config) ~= "table" or type(Config.ALL_ACTIONS) ~= "table" then
+        return false
+    end
+    for _, action in ipairs(Config.ALL_ACTIONS) do
+        if action.id == SIMPLEUI_ACTION_ID then return true end
+    end
+    local entry = {
+        id = SIMPLEUI_ACTION_ID,
+        label = _("Bookshelf"),
+        icon = SIMPLEUI_ICON,
+    }
+    table.insert(Config.ALL_ACTIONS, entry)
+    self._simpleui_icon_catalogue = self._simpleui_icon_catalogue or {}
+    self._simpleui_icon_catalogue[#self._simpleui_icon_catalogue + 1] = {
+        actions = Config.ALL_ACTIONS,
+        entry = entry,
+    }
+    logger.info("Bookshelf: exposed action in Simple UI icon picker", SIMPLEUI_ACTION_ID)
+    return true
+end
+
+function Bookshelf:_removeSimpleUIIconPickerEntries()
+    for _, registration in ipairs(self._simpleui_icon_catalogue or {}) do
+        for i = #registration.actions, 1, -1 do
+            if registration.actions[i] == registration.entry then
+                table.remove(registration.actions, i)
+            end
+        end
+    end
+    self._simpleui_icon_catalogue = nil
 end
 
 function Bookshelf:_scheduleSimpleUIRegistration()
@@ -684,6 +723,9 @@ function Bookshelf:_settingsMenu()
         self:_spinItem(_("Horizontal spacing"), { "horizontal_gap" }, 0, 40, 10),
         self:_spinItem(_("Vertical spacing"), { "vertical_gap" }, 0, 40, 12),
         self:_spinItem(_("Corner radius"), { "corner_radius" }, 0, 30, 8),
+        { text = _("Progress badge background"), sub_item_table = self:_radioItems({ "progress_badge_background" }, {
+            { _("White"), "white" }, { _("Gray"), "gray" }, { _("Black"), "black" },
+        }) },
         self:_fontTextSettings("title", _("Book title"), false),
         self:_fontTextSettings("author", _("Author"), true),
         self:_fontTextSettings("category", _("Category name"), false),
@@ -747,6 +789,7 @@ function Bookshelf:stopPlugin()
         pcall(self._simpleui_qa.unregister, SIMPLEUI_ACTION_ID)
         self._simpleui_qa = nil
     end
+    self:_removeSimpleUIIconPickerEntries()
     if self._simpleui_core and self._simpleui_core.BarInjection
             and type(self._simpleui_core.BarInjection.unregister) == "function" then
         pcall(self._simpleui_core.BarInjection.unregister, SIMPLEUI_BAR_INJECTION_ID)

@@ -171,17 +171,33 @@ end
 
 function Card:_progressBadge(percent, w, h, top_offset)
     if percent == nil then return nil end
+    local style = self.menu.settings.progress_badge_background or "gray"
+    local background, foreground, border_color
+    if style == "white" then
+        background = Blitbuffer.COLOR_WHITE
+        foreground = Blitbuffer.COLOR_BLACK
+        border_color = Blitbuffer.COLOR_BLACK
+    elseif style == "black" then
+        background = Blitbuffer.COLOR_BLACK
+        foreground = Blitbuffer.COLOR_WHITE
+        border_color = Blitbuffer.COLOR_BLACK
+    else
+        background = Blitbuffer.COLOR_LIGHT_GRAY
+        foreground = Blitbuffer.COLOR_BLACK
+        border_color = Blitbuffer.COLOR_DARK_GRAY
+    end
     local text = TextWidget:new{
         text = string.format("%d%%", math.max(0, math.min(100, math.floor(percent * 100 + 0.5)))),
         face = Font:getFace("smallinfofont", 13),
-        fgcolor = Blitbuffer.COLOR_WHITE,
+        fgcolor = foreground,
     }
     local badge = FrameContainer:new{
         padding = Screen:scaleBySize(3),
         margin = Screen:scaleBySize(2),
-        bordersize = 0,
+        bordersize = math.max(1, Size.border.thin),
+        color = border_color,
         radius = Screen:scaleBySize(5),
-        background = Blitbuffer.COLOR_DARK_GRAY,
+        background = background,
         text,
     }
     return RightContainer:new{

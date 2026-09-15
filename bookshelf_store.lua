@@ -23,6 +23,7 @@ local DEFAULTS = {
         horizontal_gap = 10,
         vertical_gap = 12,
         corner_radius = 8,
+        progress_badge_background = "gray",
         hide_missing = false,
         title = { font = nil, size = 18, max_lines = 2, align = "center", ellipsis = true },
         author = { font = nil, size = 14, max_lines = 1, align = "center", ellipsis = true, show = true },
