@@ -5,7 +5,6 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
 local FontChooser = require("ui/widget/fontchooser")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -15,7 +14,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -70,6 +68,76 @@ local CategoryCover = WidgetContainer:extend{
 
 function CategoryCover:getSize()
     return Geom:new{ w = self.width, h = self.height }
+end
+
+-- A compact bookmark-shaped progress marker: rounded flat top, straight
+-- body, and a gently rounded taper to the lower point. It is drawn by
+-- scanlines so it works on KOReader's grayscale blitbuffer without SVG or
+-- alpha-mask allocations for every card.
+local RibbonBadge = WidgetContainer:extend{
+    width = 1,
+    height = 1,
+    body_height = 1,
+    radius = 1,
+    bordersize = 1,
+    background = Blitbuffer.COLOR_BLACK,
+    color = Blitbuffer.COLOR_BLACK,
+}
+
+function RibbonBadge:getSize()
+    return Geom:new{ w = self.width, h = self.height }
+end
+
+local function ribbonRowInset(row, width, height, body_height, radius)
+    if row < radius then
+        local dy = radius - row - 0.5
+        return math.max(0, math.ceil(radius - math.sqrt(math.max(0, radius * radius - dy * dy))))
+    end
+    if row < body_height then return 0 end
+    local tail_height = math.max(1, height - body_height)
+    local t = math.min(1, math.max(0, (row - body_height + 0.5) / tail_height))
+    -- Smoothstep rounds both the square-to-triangle shoulders and the tip.
+    local eased = t * t * (3 - 2 * t)
+    return math.min(math.floor((width - 1) / 2),
+        math.floor((width - 1) * 0.5 * eased + 0.5))
+end
+
+local function paintRibbonShape(bb, x, y, width, height, body_height, radius, color)
+    for row = 0, height - 1 do
+        local inset = ribbonRowInset(row, width, height, body_height, radius)
+        bb:paintRect(x + inset, y + row, math.max(1, width - 2 * inset), 1, color)
+    end
+end
+
+function RibbonBadge:paintTo(bb, x, y)
+    self.dimen = self.dimen or Geom:new{}
+    self.dimen.x, self.dimen.y = x, y
+    self.dimen.w, self.dimen.h = self.width, self.height
+    paintRibbonShape(bb, x, y, self.width, self.height,
+        self.body_height, self.radius, self.color)
+    local border = self.bordersize
+    if self.background ~= self.color and self.width > border * 2 and self.height > border * 2 then
+        paintRibbonShape(bb, x + border, y + border,
+            self.width - border * 2, self.height - border * 2,
+            math.max(1, self.body_height - border),
+            math.max(1, self.radius - border), self.background)
+    end
+    if self[1] then self[1]:paintTo(bb, x, y) end
+end
+
+local BadgeAnchor = WidgetContainer:extend{
+    width = 1,
+    height = 1,
+    offset_x = 0,
+    offset_y = 0,
+}
+
+function BadgeAnchor:getSize()
+    return Geom:new{ w = self.width, h = self.height }
+end
+
+function BadgeAnchor:paintTo(bb, x, y)
+    if self[1] then self[1]:paintTo(bb, x + self.offset_x, y + self.offset_y) end
 end
 
 function CategoryCover:paintTo(bb, x, y)
@@ -197,28 +265,37 @@ function Card:_progressBadge(percent, w, h, top_offset)
     -- outer geometry and right-edge anchoring.
     local reference = TextWidget:new{ text = "100%", face = badge_face }
     local reference_size = reference:getSize()
+    local padding = Screen:scaleBySize(3)
+    local border = math.max(1, Size.border.thin)
+    local badge_w = reference_size.w + 2 * (padding + border)
+    local body_h = reference_size.h + 2 * (padding + border)
+    local tail_h = math.max(Screen:scaleBySize(7), math.floor(body_h * 0.34))
+    local badge_h = body_h + tail_h
     local fixed_text = CenterContainer:new{
-        dimen = Geom:new{ w = reference_size.w, h = reference_size.h },
+        dimen = Geom:new{ w = badge_w, h = body_h },
         text,
     }
-    local badge = FrameContainer:new{
-        padding = Screen:scaleBySize(3),
-        margin = Screen:scaleBySize(2),
-        bordersize = math.max(1, Size.border.thin),
+    local badge = RibbonBadge:new{
+        width = badge_w,
+        height = badge_h,
+        body_height = body_h,
+        bordersize = border,
         color = border_color,
         radius = Screen:scaleBySize(5),
         background = background,
         fixed_text,
     }
-    return RightContainer:new{
-        dimen = Geom:new{ w = w, h = h },
-        TopContainer:new{
-            dimen = Geom:new{ w = badge:getSize().w, h = h },
-            VerticalGroup:new{
-                VerticalSpan:new{ width = top_offset or 0 },
-                badge,
-            },
-        },
+    local center_x = math.floor(w * 0.75)
+    local offset_x = math.max(0, math.min(w - badge_w,
+        center_x - math.floor(badge_w / 2)))
+    local protrusion = Screen:scaleBySize(3)
+    local offset_y = math.max(0, (top_offset or 0) - protrusion)
+    return BadgeAnchor:new{
+        width = w,
+        height = h,
+        offset_x = offset_x,
+        offset_y = offset_y,
+        badge,
     }
 end
 
