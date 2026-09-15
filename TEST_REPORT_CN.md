@@ -9,7 +9,7 @@
 | 同书多分类、重复路径、加入/移出、分类内排序 | 通过 | `tests/store_spec.lua` 覆盖重复消除、排序和原文件保护 |
 | 确认式分类操作 | 通过 | 草稿不触碰 Store；`applyBookCategories` 一次应用已有分类与新分类，并经测试确认只 flush 一次；简化模式仍使用立即切换 |
 | 打开书籍并沿用原阅读数据 | 接口通过 | 按 2026.07.1 标准顺序执行 `SetupShowReader → 关闭书架 Grid → nextTick → filemanagerutil.openFile`；进程内记录分类 ID/页码，未创建副本或新阅读记录路径 |
-| 阅读进度与角标底色 | 接口通过 | 读取 2026.07.1 的 `BookList.getBookInfo(path)`；未开始隐藏，完成显示 100%；白/灰底使用黑字，黑底使用白字，三种样式保持相同角标几何尺寸 |
+| 阅读进度与角标底色 | 几何通过 | 读取 2026.07.1 的 `BookList.getBookInfo(path)`；未开始隐藏，完成显示 100%；白/灰底使用黑字，黑底使用白字；固定文字容器按最宽的 `100%` 计算，保证 `1%`、`52%`、`100%` 与三种底色的角标尺寸、右边缘和顶部位置一致 |
 | 横竖屏切换 | 静态通过 | 每次布局读取 `Screen:getWidth()/getHeight()`，列数分别持久化，尺寸经 `Screen:scaleBySize()` 计算 |
 | 封面百分比、比例、裁剪、间距、圆角、行数 | 通过 | 设置路径独立；更新时调用当前 Grid 的 `refreshLayout()`；缓存键 8 项失效检查通过（含渲染版本） |
 | 字体缺失 | 通过 | `FontChooser.isFontRegistered()` 校验，失败回退 `Font:getFace("cfont", size)` |

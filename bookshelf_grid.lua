@@ -186,10 +186,20 @@ function Card:_progressBadge(percent, w, h, top_offset)
         foreground = Blitbuffer.COLOR_BLACK
         border_color = Blitbuffer.COLOR_DARK_GRAY
     end
+    local badge_face = Font:getFace("smallinfofont", 13)
     local text = TextWidget:new{
         text = string.format("%d%%", math.max(0, math.min(100, math.floor(percent * 100 + 0.5)))),
-        face = Font:getFace("smallinfofont", 13),
+        face = badge_face,
         fgcolor = foreground,
+    }
+    -- Size every badge from the widest possible label. Wrapping the actual
+    -- TextWidget in this fixed box keeps 1%, 52% and 100% identical in both
+    -- outer geometry and right-edge anchoring.
+    local reference = TextWidget:new{ text = "100%", face = badge_face }
+    local reference_size = reference:getSize()
+    local fixed_text = CenterContainer:new{
+        dimen = Geom:new{ w = reference_size.w, h = reference_size.h },
+        text,
     }
     local badge = FrameContainer:new{
         padding = Screen:scaleBySize(3),
@@ -198,7 +208,7 @@ function Card:_progressBadge(percent, w, h, top_offset)
         color = border_color,
         radius = Screen:scaleBySize(5),
         background = background,
-        text,
+        fixed_text,
     }
     return RightContainer:new{
         dimen = Geom:new{ w = w, h = h },
