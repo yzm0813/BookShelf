@@ -10,12 +10,14 @@
 | 确认式分类操作 | 通过 | 草稿不触碰 Store；`applyBookCategories` 一次应用已有分类与新分类，并经测试确认只 flush 一次；简化模式仍使用立即切换 |
 | 打开书籍并沿用原阅读数据 | 接口通过 | 按 2026.07.1 标准顺序执行 `SetupShowReader → 关闭书架 Grid → nextTick → filemanagerutil.openFile`；进程内记录分类 ID/页码，未创建副本或新阅读记录路径 |
 | 阅读进度与角标底色 | 几何通过 | 读取 2026.07.1 的 `BookList.getBookInfo(path)`；未开始隐藏，完成显示 100%；白/灰底使用黑字，黑底使用白字；扫描线绘制圆角平顶与柔和尖底，宽度为封面的 `5/24`，矩形/三角形高度分别为宽度的 `3/5`、`3/10`，中心锚定封面宽度 `4/5`，顶部上移总高度的 `1/4`；文字缩至原来的约 `80%` 并在完整角标内居中，保证 `1%`、`52%`、`100%` 与三种底色的角标尺寸和位置一致 |
+| 角标颜色即时应用 | 静态通过 | `RibbonBadge.paintTo()` 每次从当前设置解析白/灰/黑底色及相应文字色；切换设置后重建活动网格并标记整个窗口栈重绘，避免主菜单保存的旧底图覆盖新颜色 |
 | 横竖屏切换 | 静态通过 | 每次布局读取 `Screen:getWidth()/getHeight()`，列数分别持久化，尺寸经 `Screen:scaleBySize()` 计算 |
 | 封面百分比、比例、裁剪、间距、圆角、行数 | 通过 | 设置路径独立；更新时调用当前 Grid 的 `refreshLayout()`；缓存键 8 项失效检查通过（含渲染版本） |
 | 字体缺失 | 通过 | `FontChooser.isFontRegistered()` 校验，失败回退 `Font:getFace("cfont", size)` |
 | 文件路径失效与暂时卸载存储 | 通过 | 失效记录可显示/隐藏；书库根不可用时清理拒绝执行；根外路径保守保留 |
 | 未分类扫描 | 通过 | `tests/scanner_spec.lua` 覆盖递归、格式过滤、`.sdr/cache` 排除及已分类过滤 |
 | 首页分类与未分类单书混排 | 通过 | `tests/main_spec.lua` 验证分类在前、未分类书籍为独立 `book` 卡片且不存在中转卡片 |
+| 书籍排序 | 通过 | `tests/main_spec.lua` 覆盖手动顺序、名称升序、文件修改时间最新优先、KOReader 阅读历史时间最新优先及未读书籍后置；排序不修改分类存储数组 |
 | 未分类列表文件名解析 | 通过 | 使用 2026.07.1 的 `filemanagerutil.splitFileNameType`；静态回归检查禁止调用不存在的 `util.splitFileNameType` |
 | 分类返回及阅读返回 | 接口通过 | 分类 Grid 在构造时设置 `onReturn`；阅读返回在 FileManager 首个 UI tick 执行，不再等待 0.2 秒；上下文只驻留 UIManager 内存，分类失效时安全回到书架首页 |
 | Simple UI 独立底栏及图标选择 | 通过 | `tests/main_spec.lua` 验证 `bookshelf_open`、`bookshelf_grid_nav` 和图标选择运行时目录项的注册/注销；选择结果由 Simple UI 保存为标准动作图标覆盖，不写 `simpleui_bar_tabs` |

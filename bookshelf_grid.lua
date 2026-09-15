@@ -10,6 +10,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
+local IconButton = require("ui/widget/iconbutton")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
@@ -29,6 +30,18 @@ local logger = require("logger")
 local _ = require("bookshelf_i18n")
 
 local Screen = Device.screen
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local plugin_dir = source_path:match("^(.*)[/\\]bookshelf_grid%.lua$") or "."
+local SORT_ICON = plugin_dir .. "/icons/sort.svg"
+
+local function badgePalette(style)
+    if style == "white" then
+        return Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_BLACK
+    elseif style == "black" then
+        return Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_BLACK
+    end
+    return Blitbuffer.COLOR_LIGHT_GRAY, Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_DARK_GRAY
+end
 
 -- FrameContainer paints its border before its child. On cover images that can
 -- let the child overwrite anti-aliased corner pixels. CoverFrame deliberately
@@ -82,6 +95,8 @@ local RibbonBadge = WidgetContainer:extend{
     bordersize = 1,
     background = Blitbuffer.COLOR_BLACK,
     color = Blitbuffer.COLOR_BLACK,
+    style_settings = nil,
+    text_widget = nil,
 }
 
 function RibbonBadge:getSize()
@@ -110,6 +125,16 @@ local function paintRibbonShape(bb, x, y, width, height, body_height, radius, co
 end
 
 function RibbonBadge:paintTo(bb, x, y)
+    -- Settings can be changed while KOReader's main menu is covering this
+    -- grid. Resolve the palette at paint time so the restored underlying
+    -- page never reuses the colors captured by an older badge instance.
+    if self.style_settings then
+        local background, foreground, border_color =
+            badgePalette(self.style_settings.progress_badge_background)
+        self.background = background
+        self.color = border_color
+        if self.text_widget then self.text_widget.fgcolor = foreground end
+    end
     self.dimen = self.dimen or Geom:new{}
     self.dimen.x, self.dimen.y = x, y
     self.dimen.w, self.dimen.h = self.width, self.height
@@ -240,20 +265,7 @@ end
 function Card:_progressBadge(percent, w, h, top_offset)
     if percent == nil then return nil end
     local style = self.menu.settings.progress_badge_background or "gray"
-    local background, foreground, border_color
-    if style == "white" then
-        background = Blitbuffer.COLOR_WHITE
-        foreground = Blitbuffer.COLOR_BLACK
-        border_color = Blitbuffer.COLOR_BLACK
-    elseif style == "black" then
-        background = Blitbuffer.COLOR_BLACK
-        foreground = Blitbuffer.COLOR_WHITE
-        border_color = Blitbuffer.COLOR_BLACK
-    else
-        background = Blitbuffer.COLOR_LIGHT_GRAY
-        foreground = Blitbuffer.COLOR_BLACK
-        border_color = Blitbuffer.COLOR_DARK_GRAY
-    end
+    local background, foreground, border_color = badgePalette(style)
     -- The approved 50 x 45 mock-up maps to a 240 px cover. Keep those
     -- proportions on every screen and orientation instead of fixing pixels.
     local badge_w = math.max(Screen:scaleBySize(20), math.floor(w * 5 / 24 + 0.5))
@@ -281,6 +293,8 @@ function Card:_progressBadge(percent, w, h, top_offset)
         color = border_color,
         radius = math.max(1, math.floor(badge_w * 0.14 + 0.5)),
         background = background,
+        style_settings = self.menu.settings,
+        text_widget = text,
         fixed_text,
     }
     local center_x = math.floor(w * 0.8 + 0.5)
@@ -431,6 +445,78 @@ function Grid:init()
     self.settings = self.store:getSettings()
     self._pending, self._pending_keys = {}, {}
     BookList.init(self)
+    self:_installSortButton()
+end
+
+function Grid:_installSortButton()
+    local title_bar = self.title_bar
+    local action_button = title_bar and title_bar.left_button
+    if not action_button then return end
+
+    -- The stock TitleBar deliberately gives its left button an oversized
+    -- right-hand tap zone. A neighboring button would sit inside that zone,
+    -- so make the action button's horizontal hit area symmetrical first.
+    action_button.padding_right = action_button.padding_left or title_bar.button_padding or 0
+    action_button:update()
+
+    local icon_size = action_button.width
+        or (action_button.image and action_button.image:getSize().w)
+        or Screen:scaleBySize(36)
+    local button = IconButton:new{
+        icon = "appbar.menu",
+        width = icon_size,
+        height = icon_size,
+        padding = 0,
+        show_parent = self,
+        callback = function() self.plugin:showSortDialog(self) end,
+    }
+    button.icon = nil
+    button.image.icon = nil
+    button.image.file = SORT_ICON
+    pcall(button.image.free, button.image)
+    pcall(button.image.init, button.image)
+    button:update()
+    table.insert(title_bar, button)
+    self.sort_button = button
+    self:positionSortButton()
+end
+
+-- Keep the sort control adjacent to the + button. Simple UI may move the
+-- native button to a configurable title-bar slot; its Bar Injection callback
+-- calls this again after that move, without patching either plugin.
+function Grid:positionSortButton()
+    local title_bar, button = self.title_bar, self.sort_button
+    local action_button = title_bar and title_bar.left_button
+    if not (title_bar and button and action_button) then return end
+
+    local image_size = action_button.image and action_button.image:getSize()
+    local icon_size = image_size and image_size.w or action_button.width or Screen:scaleBySize(36)
+    if button.width ~= icon_size then
+        button.width, button.height = icon_size, icon_size
+        button.image.width, button.image.height = icon_size, icon_size
+        pcall(button.image.free, button.image)
+        pcall(button.image.init, button.image)
+        button:update()
+    end
+
+    local padding_left = action_button.padding_left or 0
+    local padding_top = action_button.padding_top or 0
+    local base_x
+    if action_button.overlap_offset and action_button.overlap_offset[1] then
+        base_x = action_button.overlap_offset[1] + padding_left
+    elseif action_button.overlap_align == "right" then
+        base_x = Screen:getWidth() - action_button:getSize().w + padding_left
+    else
+        base_x = padding_left
+    end
+    local gap = Screen:scaleBySize(10)
+    local x = base_x > Screen:getWidth() / 2
+        and base_x - icon_size - gap
+        or base_x + icon_size + gap
+    x = math.max(0, math.min(Screen:getWidth() - icon_size, x))
+    button.overlap_align = nil
+    button.overlap_offset = { x, padding_top }
+    title_bar:resetLayout()
 end
 
 function Grid:_recalculateDimen()
