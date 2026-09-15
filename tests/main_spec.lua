@@ -66,7 +66,9 @@ local shelf = setmetatable({
 local entries = shelf:_rootEntries()
 assert(#entries == 3, "root must contain categories plus individual uncategorized books")
 assert(entries[1].kind == "category" and entries[1].category_id == "one")
+assert(entries[1].book_count == 1, "category card must expose its current book count")
 assert(entries[2].kind == "category" and entries[2].category_id == "two")
+assert(entries[2].book_count == 0)
 assert(entries[3].kind == "book" and entries[3].path == second)
 for _, entry in ipairs(entries) do
     assert(entry.kind ~= "uncategorized", "uncategorized grouping card must not return")

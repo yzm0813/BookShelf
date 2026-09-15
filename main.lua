@@ -189,6 +189,7 @@ function Bookshelf:_rootEntries()
             category_id = category.id,
             name = category.name,
             path = self.store:firstValidBook(category),
+            book_count = #category.books,
         }
     end
     for _, entry in ipairs(self:_bookEntries(self.uncategorized)) do

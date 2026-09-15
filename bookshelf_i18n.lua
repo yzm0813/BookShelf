@@ -8,6 +8,7 @@ local zh = {
     ["Alignment"] = "对齐方式",
     ["Author"] = "作者",
     ["Book title"] = "书名",
+    ["%d books"] = "%d 本书",
     ["Cancel"] = "取消",
     ["Category name cannot be empty."] = "分类名称不能为空。",
     ["Category name"] = "分类名称",

@@ -27,6 +27,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local _ = require("bookshelf_i18n")
 
 local Screen = Device.screen
 
@@ -54,6 +55,39 @@ function CoverFrame:paintTo(bb, x, y)
         Blitbuffer.COLOR_BLACK, self.radius, G_reader_settings:nilOrTrue("anti_alias_ui"))
 end
 
+-- Category covers reserve a small strip above the real cover for four
+-- perspective "book page" lines. The farthest line is shortest and every
+-- following line grows toward the foreground cover.
+local CategoryCover = WidgetContainer:extend{
+    width = 1,
+    height = 1,
+    stack_height = 0,
+    line_count = 4,
+    line_thickness = 1,
+}
+
+function CategoryCover:getSize()
+    return Geom:new{ w = self.width, h = self.height }
+end
+
+function CategoryCover:paintTo(bb, x, y)
+    self.dimen = self.dimen or Geom:new{}
+    self.dimen.x, self.dimen.y = x, y
+    self.dimen.w, self.dimen.h = self.width, self.height
+    local step = self.line_count > 1
+        and math.floor((self.stack_height - self.line_thickness) / (self.line_count - 1)) or 0
+    local max_inset = math.floor(self.width * 0.18)
+    local min_inset = math.max(self.line_thickness, math.floor(self.width * 0.05))
+    for i = 1, self.line_count do
+        local progress = self.line_count > 1 and (i - 1) / (self.line_count - 1) or 1
+        local inset = math.floor(max_inset - (max_inset - min_inset) * progress)
+        bb:paintRect(x + inset, y + (i - 1) * step,
+            math.max(1, self.width - 2 * inset), self.line_thickness,
+            Blitbuffer.COLOR_DARK_GRAY)
+    end
+    if self[1] then self[1]:paintTo(bb, x, y + self.stack_height) end
+end
+
 local function safeFace(config)
     local name = config.font
     if name and not FontChooser.isFontRegistered(name) then name = nil end
@@ -66,7 +100,7 @@ local function textHeight(config)
     return math.max(1, Screen:scaleBySize(math.floor(config.size * 1.28))) * config.max_lines
 end
 
-local function makeText(text, config, width, bold)
+local function makeText(text, config, width, bold, color)
     return TextBoxWidget:new{
         text = text or "",
         face = safeFace(config),
@@ -76,6 +110,7 @@ local function makeText(text, config, width, bold)
         height_adjust = true,
         height_overflow_show_ellipsis = config.ellipsis,
         alignment = config.align,
+        fgcolor = color or Blitbuffer.COLOR_BLACK,
     }
 end
 
@@ -165,13 +200,20 @@ function Card:_build()
     -- Reserve the larger title slot and an author slot for every card so the
     -- cover tops and text baselines do not move with content or font choice.
     local title_slot_h = math.max(textHeight(settings.title), textHeight(settings.category))
-    local author_slot_h = settings.author.show and textHeight(settings.author) or 0
+    -- The second text row is permanent: it contains a grey category book
+    -- count, a grey author, or an empty placeholder when authors are hidden.
+    local author_slot_h = textHeight(settings.author)
     local text_gap = Screen:scaleBySize(2)
     local cover_area_h = math.max(Screen:scaleBySize(20),
         self.height - title_slot_h - author_slot_h - 2 * text_gap)
-    local cover_w, cover_h = self:_coverDimensions(cover_area_h, metadata)
+    local stack_line_count = 4
+    local stack_line_thickness = math.max(1, Size.line.medium)
+    local stack_height = category_like and math.max(stack_line_count * stack_line_thickness,
+        math.floor(Screen:scaleBySize(12) * settings.cover_scale_percent / 100)) or 0
+    local cover_w, cover_h = self:_coverDimensions(
+        math.max(1, cover_area_h - stack_height), metadata)
     local radius = math.min(Screen:scaleBySize(settings.corner_radius), math.floor(math.min(cover_w, cover_h) / 2))
-    local border = math.max(1, Size.border.thin)
+    local border = math.max(1, Size.border.default)
     local inner_w = math.max(1, cover_w - 2 * border)
     local inner_h = math.max(1, cover_h - 2 * border)
     local inner_radius = math.max(0, radius - border)
@@ -205,17 +247,29 @@ function Card:_build()
             elseif info.percent_finished and info.percent_finished > 0 then progress = info.percent_finished end
         end
     end
+    local visual_h = cover_h
+    if category_like then
+        visual_h = cover_h + stack_height
+        visual = CategoryCover:new{
+            width = cover_w,
+            height = visual_h,
+            stack_height = stack_height,
+            line_count = stack_line_count,
+            line_thickness = stack_line_thickness,
+            visual,
+        }
+    end
     local cover = OverlapGroup:new{
-        dimen = Geom:new{ w = cover_w, h = cover_h },
+        dimen = Geom:new{ w = cover_w, h = visual_h },
         visual,
-        not category_like and self:_progressBadge(progress, cover_w, cover_h) or nil,
+        not category_like and self:_progressBadge(progress, cover_w, visual_h) or nil,
     }
 
     local text_w = math.max(1, self.width - 2 * Screen:scaleBySize(2))
     local group = VerticalGroup:new{ align = "center" }
     table.insert(group, TopContainer:new{
         dimen = Geom:new{ w = self.width, h = cover_area_h },
-        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = cover_h }, cover },
+        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = visual_h }, cover },
     })
     table.insert(group, VerticalSpan:new{ width = text_gap })
     local display_title = category_like and entry.name
@@ -224,13 +278,19 @@ function Card:_build()
         dimen = Geom:new{ w = self.width, h = title_slot_h },
         makeText(display_title, title_cfg, text_w, category_like),
     })
-    if settings.author.show then
-        table.insert(group, CenterContainer:new{
-            dimen = Geom:new{ w = self.width, h = author_slot_h },
-            makeText(entry.kind == "book" and metadata and metadata.authors or "",
-                settings.author, text_w, false),
-        })
+    local secondary_text
+    if category_like then
+        secondary_text = string.format(_("%d books"), entry.book_count or 0)
+    elseif settings.author.show then
+        secondary_text = metadata and metadata.authors or ""
+    else
+        secondary_text = ""
     end
+    table.insert(group, CenterContainer:new{
+        dimen = Geom:new{ w = self.width, h = author_slot_h },
+        makeText(secondary_text, settings.author, text_w, false,
+            Blitbuffer.COLOR_DARK_GRAY),
+    })
     return CenterContainer:new{ dimen = self.dimen:copy(), group }
 end
 
