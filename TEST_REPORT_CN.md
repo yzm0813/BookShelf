@@ -27,6 +27,7 @@
 | 未分类列表文件名解析 | 通过 | 使用 2026.07.1 的 `filemanagerutil.splitFileNameType`；静态回归检查禁止调用不存在的 `util.splitFileNameType` |
 | 分类返回及阅读返回 | 自动 + 接口通过 | 分类 Grid 设置 `onReturn`；阅读返回在 FileManager 首个 UI tick 执行；测试覆盖快速重复点击只安排一次打开、teardown 取消待执行回调、分类已删除时回到书架首页；页数减少时夹紧到最后一页 |
 | Simple UI 独立底栏及图标选择 | 通过 | `tests/main_spec.lua` 验证 `bookshelf_open`、`bookshelf_grid_nav` 和图标选择运行时目录项的注册/注销；选择结果由 Simple UI 保存为标准动作图标覆盖，不写 `simpleui_bar_tabs` |
+| 标题栏排序按钮兼容 | 接口通过 | KOReader 2026.07.1 的 `TitleBar` 本身没有 `resetLayout()`；定位按钮直接更新 OverlapGroup 子项偏移，禁止调用不存在的方法，避免打开书架即报 nil method |
 | 卡片高度与四边圆角边框 | 几何通过 | 图片按边框宽度内缩，`CoverFrame` 在子图片之后最后绘制黑色圆角边框；缓存渲染版本升级为 3 |
 | 分类叠层、数量与次级文字 | 几何通过 | 所有卡片预留同一叠层槽并使用相同封面本体尺寸；分类卡绘制 3 条由窄到宽的灰线，线间距及末线到封面间距均为 `stack_line_gap`；标题底对齐、次级文字顶对齐，并仅保留一个缩放间距 |
 | 与 Simple UI、CoverBrowser 同时启用 | 静态兼容通过 | 使用 Simple UI 的 QA 与 Bar Injection 公开注册接口，没有目标类方法赋值或对方设置键写入 |

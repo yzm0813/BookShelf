@@ -521,7 +521,8 @@ function Grid:positionSortButton()
     x = math.max(0, math.min(Screen:getWidth() - icon_size, x))
     button.overlap_align = nil
     button.overlap_offset = { x, padding_top }
-    title_bar:resetLayout()
+    -- Stock KOReader's TitleBar has no resetLayout(). OverlapGroup consumes
+    -- the updated child offset directly on its next paint.
 end
 
 function Grid:_recalculateDimen()
