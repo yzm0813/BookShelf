@@ -79,7 +79,9 @@ local QA = {
 }
 package.loaded["features/sui_quickactions"] = QA
 local bi_registered, bi_unregistered
+local live_simpleui = { active_action = "home" }
 package.loaded["infra/sui_core"] = {
+    getLivePlugin = function() return live_simpleui end,
     BarInjection = {
         register = function(desc) bi_registered = desc end,
         unregister = function(id) bi_unregistered = id end,
@@ -93,8 +95,11 @@ assert(type(registered.execute) == "function")
 assert(bi_registered.id == "bookshelf_grid_nav")
 assert(bi_registered.widget_name == "bookshelf_grid")
 assert(bi_registered.active_action_id == "bookshelf_open")
+assert(shelf:_activateSimpleUIBookshelf())
+assert(live_simpleui.active_action == "bookshelf_open",
+    "bookshelf must seed the active tab before its grid is injected")
 shelf:stopPlugin()
 assert(unregistered == "bookshelf_open", "Simple UI action must be removed on plugin stop")
 assert(bi_unregistered == "bookshelf_grid_nav", "Simple UI page registration must be removed")
 
-print("PASS main_spec: flat root and Simple UI action/page lifecycle")
+print("PASS main_spec: flat root, prepaint tab activation, and Simple UI lifecycle")

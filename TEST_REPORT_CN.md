@@ -17,8 +17,8 @@
 | 未分类扫描 | 通过 | `tests/scanner_spec.lua` 覆盖递归、格式过滤、`.sdr/cache` 排除及已分类过滤 |
 | 首页分类与未分类单书混排 | 通过 | `tests/main_spec.lua` 验证分类在前、未分类书籍为独立 `book` 卡片且不存在中转卡片 |
 | 未分类列表文件名解析 | 通过 | 使用 2026.07.1 的 `filemanagerutil.splitFileNameType`；静态回归检查禁止调用不存在的 `util.splitFileNameType` |
-| 分类返回及阅读返回 | 接口通过 | 分类 Grid 在构造时设置 `onReturn`；阅读返回上下文只驻留 UIManager 内存，分类失效时安全回到书架首页 |
-| Simple UI 独立底栏候选项 | 通过 | `tests/main_spec.lua` 验证 `bookshelf_open` 与 `bookshelf_grid_nav` 注册/注销；不写 `simpleui_bar_tabs` |
+| 分类返回及阅读返回 | 接口通过 | 分类 Grid 在构造时设置 `onReturn`；阅读返回在 FileManager 首个 UI tick 执行，不再等待 0.2 秒；上下文只驻留 UIManager 内存，分类失效时安全回到书架首页 |
+| Simple UI 独立底栏候选项 | 通过 | `tests/main_spec.lua` 验证 `bookshelf_open` 与 `bookshelf_grid_nav` 注册/注销，并在 Grid 注入前把实时 `active_action` 设为 `bookshelf_open`；不写 `simpleui_bar_tabs` |
 | 卡片高度与四边圆角边框 | 几何通过 | 图片按边框宽度内缩，`CoverFrame` 在子图片之后最后绘制黑色圆角边框；缓存渲染版本升级为 3 |
 | 与 Simple UI、CoverBrowser 同时启用 | 静态兼容通过 | 使用 Simple UI 的 QA 与 Bar Injection 公开注册接口，没有目标类方法赋值或对方设置键写入 |
 | 禁用恢复 | 通过 | `stopPlugin/onTeardown` 关闭活动 Grid、注销动作及页面描述、移除文件长按入口，只刷新私有设置 |

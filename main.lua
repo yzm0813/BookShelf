@@ -50,7 +50,10 @@ function Bookshelf:init()
         if return_context then UIManager._bookshelf_reader_return = nil end
         if return_context and type(self.ui.registerPostInitCallback) == "function" then
             self.ui:registerPostInitCallback(function()
-                UIManager:scheduleIn(0.2, function()
+                -- Run on the first UI tick, before FileManager's pending paint
+                -- is flushed. Delaying this made the native Library visible for
+                -- one e-ink refresh before the bookshelf replaced it.
+                UIManager:scheduleIn(0, function()
                     if self._stopped then return end
                     local category = return_context.category_id
                         and self.store:getCategory(return_context.category_id)
@@ -132,6 +135,19 @@ function Bookshelf:_info(text, timeout)
     UIManager:show(InfoMessage:new{ text = text, timeout = timeout or 2 })
 end
 
+-- BarInjection determines the bar shown on a new widget from Simple UI's
+-- active_action *before* it runs the descriptor's post-injection activation.
+-- Seed that public live-plugin state first so the bookshelf widget itself is
+-- born with the Bookshelf tab selected instead of briefly inheriting Library.
+function Bookshelf:_activateSimpleUIBookshelf()
+    local Core = self._simpleui_core or package.loaded["infra/sui_core"]
+    if not (Core and type(Core.getLivePlugin) == "function") then return false end
+    local ok, plugin = pcall(Core.getLivePlugin)
+    if not ok or not plugin then return false end
+    plugin.active_action = SIMPLEUI_ACTION_ID
+    return true
+end
+
 function Bookshelf:_closeFileDialog()
     local chooser = self.ui and self.ui.file_chooser
     if chooser and chooser.file_dialog then
@@ -199,6 +215,7 @@ function Bookshelf:_bookEntries(paths, category_id)
 end
 
 function Bookshelf:_showGrid(title, entries, context, return_to_root, initial_page)
+    self:_activateSimpleUIBookshelf()
     local grid
     local function return_to_parent()
         if not grid or grid._bookshelf_returning then return true end
