@@ -254,25 +254,23 @@ function Card:_progressBadge(percent, w, h, top_offset)
         foreground = Blitbuffer.COLOR_BLACK
         border_color = Blitbuffer.COLOR_DARK_GRAY
     end
-    local badge_face = Font:getFace("smallinfofont", 13)
+    -- The approved 50 x 45 mock-up maps to a 240 px cover. Keep those
+    -- proportions on every screen and orientation instead of fixing pixels.
+    local badge_w = math.max(Screen:scaleBySize(20), math.floor(w * 5 / 24 + 0.5))
+    local body_h = math.max(1, math.floor(badge_w * 3 / 5 + 0.5))
+    local tail_h = math.max(1, math.floor(badge_w * 3 / 10 + 0.5))
+    local badge_h = body_h + tail_h
+    local badge_face = Font:getFace("smallinfofont", math.max(8, math.floor(13 * 0.8 + 0.5)))
     local text = TextWidget:new{
         text = string.format("%d%%", math.max(0, math.min(100, math.floor(percent * 100 + 0.5)))),
         face = badge_face,
         fgcolor = foreground,
     }
-    -- Size every badge from the widest possible label. Wrapping the actual
-    -- TextWidget in this fixed box keeps 1%, 52% and 100% identical in both
-    -- outer geometry and right-edge anchoring.
-    local reference = TextWidget:new{ text = "100%", face = badge_face }
-    local reference_size = reference:getSize()
-    local padding = Screen:scaleBySize(3)
+    -- Every percentage shares the same cover-relative box. The text is
+    -- centered over the complete ribbon, matching the approved preview.
     local border = math.max(1, Size.border.thin)
-    local badge_w = reference_size.w + 2 * (padding + border)
-    local body_h = reference_size.h + 2 * (padding + border)
-    local tail_h = math.max(Screen:scaleBySize(7), math.floor(body_h * 0.34))
-    local badge_h = body_h + tail_h
     local fixed_text = CenterContainer:new{
-        dimen = Geom:new{ w = badge_w, h = body_h },
+        dimen = Geom:new{ w = badge_w, h = badge_h },
         text,
     }
     local badge = RibbonBadge:new{
@@ -281,14 +279,14 @@ function Card:_progressBadge(percent, w, h, top_offset)
         body_height = body_h,
         bordersize = border,
         color = border_color,
-        radius = Screen:scaleBySize(5),
+        radius = math.max(1, math.floor(badge_w * 0.14 + 0.5)),
         background = background,
         fixed_text,
     }
-    local center_x = math.floor(w * 0.75)
+    local center_x = math.floor(w * 0.8 + 0.5)
     local offset_x = math.max(0, math.min(w - badge_w,
         center_x - math.floor(badge_w / 2)))
-    local protrusion = Screen:scaleBySize(3)
+    local protrusion = math.max(1, math.floor(badge_h / 4 + 0.5))
     local offset_y = math.max(0, (top_offset or 0) - protrusion)
     return BadgeAnchor:new{
         width = w,
