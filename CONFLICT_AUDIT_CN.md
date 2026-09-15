@@ -19,3 +19,5 @@ Simple UI 在 `main.lua:928-949` 首次运行时写全局 `start_with=homescreen
 Bookshelf 没有给 FileChooser、FileManager、CoverBrowser、History、Collections 或 FileSearcher 的类/实例方法赋值；长按注册键为 `bookshelf_add_to_shelf`。检测到 Simple UI 时，插件通过其公开的 `QA.register` 注册 `bookshelf_open` 候选动作，并通过 `sui_core.BarInjection.register` 声明 `bookshelf_grid` 页面；同时仅在内存中的 `Config.ALL_ACTIONS` 目录加入同一动作，使 Simple UI 的图标选择页能够列出它，禁用时按对象引用清理该目录项。插件不会修改 Simple UI 源码，不写 `start_with` 或 `simpleui_bar_tabs`；只有用户在 Simple UI 图标选择器中主动选择图标时，Simple UI 自身才写标准键 `simpleui_action_bookshelf_open_icon`。插件只读全局 `home_dir` 与 `language`，不会覆盖 CoverBrowser SQLite 配置或两个插件的文件。阅读返回上下文只放在 UIManager 的进程内存中，KOReader 重启后自动消失。启动书架使用自身布尔设置和 `FileManager.registerPostInitCallback`；默认关闭，回调异常由 `pcall` 捕获并仅写日志。
 
 这消除了方法保存/恢复顺序冲突：无论三个插件按什么路径顺序加载，Bookshelf 都不成为现有 monkey-patch 链的一层，禁用它也不会把 FileChooser/FileManager 恢复到错误版本。
+
+本轮新增功能没有改变上述边界。“重新定位书籍”按需创建 KOReader 原生 `PathChooser` 实例并通过 `DocumentRegistry.hasProvider` 校验目标，只修改 Bookshelf 私有路径引用；搜索读取 `FileManagerBookInfo.getDocProps` 与私有 metadata；Smart Shelf 只读 `BookList.getBookInfo` 和 `ReadHistory.hist`；自定义分类封面仍使用原书路径与 Bookshelf 私有缩略图。没有新增 FileChooser/FileManager 方法覆盖，也没有写入 Simple UI、CoverBrowser、原书或 `.sdr`。

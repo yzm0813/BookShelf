@@ -58,6 +58,7 @@ function Bookshelf:init()
                     local category = return_context.category_id
                         and self.store:getCategory(return_context.category_id)
                     if category then self:showCategory(category.id, return_context.page)
+                    elseif return_context.smart_id then self:showSmartShelf(return_context.smart_id, return_context.page)
                     else self:showRoot(return_context.page) end
                 end)
             end)
@@ -221,12 +222,93 @@ end
 
 function Bookshelf:_scan()
     local root = G_reader_settings:readSetting("home_dir") or DataStorage:getDataDir()
-    self.all_books = Scanner.scan(root)
+    self.all_books, self._scan_complete = Scanner.scan(root)
     self.uncategorized = Scanner.uncategorized(self.all_books, self.store)
+    local removed, err = self.store:gcMetadata(self.all_books, self._scan_complete)
+    if not removed and err then logger.warn("Bookshelf: metadata cleanup skipped:", err) end
+end
+
+function Bookshelf:_allKnownBookPaths()
+    local result, seen = {}, {}
+    local function add(path)
+        if type(path) == "string" and not seen[path] then
+            seen[path] = true
+            result[#result + 1] = path
+        end
+    end
+    for _, path in ipairs(self.all_books or {}) do add(path) end
+    for _, category in ipairs(self.store.data.categories) do
+        for _, path in ipairs(category.books) do add(path) end
+    end
+    return result
+end
+
+function Bookshelf:_smartShelfGroups()
+    local paths = self:_allKnownBookPaths()
+    local groups = { recent = {}, reading = {}, unread = {}, read = {} }
+    local ok_booklist, BookList = pcall(require, "ui/widget/booklist")
+    if not ok_booklist then return groups end
+    do
+        local known, result = {}, {}
+        for _, path in ipairs(paths) do known[path] = true end
+        local ok_history, history = pcall(require, "readhistory")
+        if ok_history and history and type(history.hist) == "table" then
+            for _, item in ipairs(history.hist) do
+                if known[item.file] and lfs.attributes(item.file, "mode") == "file" then
+                    result[#result + 1] = item.file
+                    known[item.file] = nil
+                end
+            end
+        end
+        groups.recent = result
+    end
+    for _, path in ipairs(paths) do
+        if lfs.attributes(path, "mode") == "file" then
+            local ok, info = pcall(BookList.getBookInfo, path)
+            info = ok and info or {}
+            local percent = tonumber(info.percent_finished) or 0
+            local complete = info.status == "complete" or percent >= 1
+            if info.been_opened and percent > 0 and not complete then
+                groups.reading[#groups.reading + 1] = path
+            elseif complete then
+                groups.read[#groups.read + 1] = path
+            elseif not info.been_opened or percent <= 0 then
+                groups.unread[#groups.unread + 1] = path
+            end
+        end
+    end
+    return groups
+end
+
+function Bookshelf:_smartShelfPaths(smart_id)
+    return self:_smartShelfGroups()[smart_id] or {}
+end
+
+function Bookshelf:_smartShelfEntries()
+    if not self.store:getSettings().smart_shelves_enabled then return {} end
+    local definitions = {
+        { "recent", _("Recently read") },
+        { "reading", _("Reading") },
+        { "unread", _("Unread") },
+        { "read", _("Read") },
+    }
+    local entries = {}
+    local groups = self:_smartShelfGroups()
+    for _, definition in ipairs(definitions) do
+        local paths = groups[definition[1]]
+        entries[#entries + 1] = {
+            kind = "smart_category",
+            smart_id = definition[1],
+            name = definition[2],
+            path = paths[1],
+            book_count = #paths,
+        }
+    end
+    return entries
 end
 
 function Bookshelf:_rootEntries()
-    local entries = {}
+    local entries = self:_smartShelfEntries()
     for _, category in ipairs(self.store.data.categories) do
         entries[#entries + 1] = {
             kind = "category",
@@ -242,9 +324,9 @@ function Bookshelf:_rootEntries()
     return entries
 end
 
-function Bookshelf:_bookEntries(paths, category_id)
+function Bookshelf:_bookEntries(paths, category_id, sort_override)
     local entries = {}
-    local sort_mode = self.store:getSettings().book_sort or "manual"
+    local sort_mode = sort_override or self.store:getSettings().book_sort or "manual"
     local last_read = {}
     if sort_mode == "last_read" then
         local ok, history = pcall(require, "readhistory")
@@ -288,12 +370,15 @@ end
 
 function Bookshelf:_showGrid(title, entries, context, return_to_root, initial_page)
     self:_activateSimpleUIBookshelf()
+    if self.active_grid and not self.active_grid._closed then
+        self:_closeGrid(self.active_grid, true, true)
+    end
     local grid
     local function return_to_parent()
         if not grid or grid._bookshelf_returning then return true end
         grid._bookshelf_returning = true
         self:_closeGrid(grid, true, true)
-        self:showRoot()
+        self:_restoreContext(context.return_context or { kind = "root" })
         return true
     end
     grid = Grid:new{
@@ -306,12 +391,24 @@ function Bookshelf:_showGrid(title, entries, context, return_to_root, initial_pa
         page = math.max(1, tonumber(initial_page) or 1),
         onReturn = return_to_root and return_to_parent or nil,
         close_callback = return_to_root and function()
-            if not grid._skip_return and not self._stopped then self:showRoot() end
+            if not grid._skip_return and not self._stopped then
+                self:_restoreContext(context.return_context or { kind = "root" })
+            end
         end or nil,
     }
     self.active_grid = grid
     UIManager:show(grid)
     return grid
+end
+
+function Bookshelf:_restoreContext(context)
+    context = context or { kind = "root" }
+    if context.kind == "category" and self.store:getCategory(context.category_id) then
+        return self:showCategory(context.category_id, context.page)
+    elseif context.kind == "smart" and self.store:getSettings().smart_shelves_enabled then
+        return self:showSmartShelf(context.smart_id, context.page)
+    end
+    return self:showRoot(context.page)
 end
 
 function Bookshelf:showRoot(page)
@@ -326,6 +423,18 @@ function Bookshelf:showCategory(category_id, page)
         { kind = "category", category_id = category.id }, true, page)
 end
 
+function Bookshelf:showSmartShelf(smart_id, page)
+    self:_scan()
+    local names = {
+        recent = _("Recently read"), reading = _("Reading"),
+        unread = _("Unread"), read = _("Read"),
+    }
+    if not names[smart_id] then return self:showRoot() end
+    local sort_override = smart_id == "recent" and "manual" or nil
+    return self:_showGrid(names[smart_id], self:_bookEntries(self:_smartShelfPaths(smart_id), nil, sort_override),
+        { kind = "smart", smart_id = smart_id }, true, page)
+end
+
 function Bookshelf:_closeGrid(grid, skip_return, keep_nav)
     if grid then grid._skip_return = skip_return end
     if grid and keep_nav then grid._navbar_closing_intentionally = true end
@@ -336,6 +445,9 @@ function Bookshelf:onGridSelect(grid, entry)
     if entry.kind == "category" then
         self:_closeGrid(grid, true, true)
         self:showCategory(entry.category_id)
+    elseif entry.kind == "smart_category" then
+        self:_closeGrid(grid, true, true)
+        self:showSmartShelf(entry.smart_id)
     elseif entry.kind == "book" then
         if self._opening_book then return end
         if lfs.attributes(entry.path, "mode") ~= "file" then
@@ -352,12 +464,20 @@ function Bookshelf:onGridSelect(grid, entry)
         self._opening_book = true
         local return_context = {
             category_id = grid.context.kind == "category" and grid.context.category_id or nil,
+            smart_id = grid.context.kind == "smart" and grid.context.smart_id or nil,
             page = grid.page or 1,
         }
         UIManager._bookshelf_reader_return = return_context
         UIManager:broadcastEvent(Event:new("SetupShowReader"))
         self:_closeGrid(grid, true, true)
         UIManager:nextTick(function()
+            if self._stopped then
+                self._opening_book = nil
+                if UIManager._bookshelf_reader_return == return_context then
+                    UIManager._bookshelf_reader_return = nil
+                end
+                return
+            end
             local ok, err = pcall(filemanagerutil.openFile, self.ui, book_path, nil, true)
             self._opening_book = nil
             if not ok then
@@ -373,6 +493,7 @@ function Bookshelf:onGridSelect(grid, entry)
                 local category = return_context.category_id
                     and self.store:getCategory(return_context.category_id)
                 if category then self:showCategory(category.id, return_context.page)
+                elseif return_context.smart_id then self:showSmartShelf(return_context.smart_id, return_context.page)
                 else self:showRoot(return_context.page) end
             end
         end)
@@ -385,7 +506,7 @@ function Bookshelf:onGridAction(grid)
     elseif grid.context.kind == "category" then
         local category = self.store:getCategory(grid.context.category_id)
         if category then self:showCategoryActions(grid, category) end
-    else
+    elseif grid.context.kind ~= "smart" then
         self:_info(_("Long-press a book to add it to a category."))
     end
 end
@@ -442,6 +563,11 @@ function Bookshelf:_refreshBookGrid(grid)
     elseif grid.context.kind == "category" then
         local category = self.store:getCategory(grid.context.category_id)
         grid.item_table = self:_bookEntries(category and category.books or {}, grid.context.category_id)
+    elseif grid.context.kind == "smart" then
+        local sort_override = grid.context.smart_id == "recent" and "manual" or nil
+        grid.item_table = self:_bookEntries(self:_smartShelfPaths(grid.context.smart_id), nil, sort_override)
+    elseif grid.context.kind == "search" then
+        grid.item_table = self:_searchEntries(grid.context.query)
     else
         self:_scan()
         grid.item_table = self:_bookEntries(self.uncategorized)
@@ -539,6 +665,10 @@ function Bookshelf:showCategoryActions(grid, category)
                 { text = _("Move earlier"), callback = function() UIManager:close(dialog) self.store:moveCategory(category.id, -1) refresh_after_move() end },
                 { text = _("Move later"), callback = function() UIManager:close(dialog) self.store:moveCategory(category.id, 1) refresh_after_move() end },
             },
+            { { text = _("Set category cover"), callback = function()
+                UIManager:close(dialog)
+                self:showCategoryCoverPicker(grid, category)
+            end } },
             { { text = _("Close"), id = "close", callback = function() UIManager:close(dialog) end } },
         },
     }
@@ -569,10 +699,219 @@ function Bookshelf:showBookActions(grid, entry)
                     UIManager:close(dialog) self.store:moveBook(grid.context.category_id, entry.path, 1) self:_refreshBookGrid(grid)
                 end },
             },
+            { { text = _("Relocate book"), enabled = entry.missing, callback = function()
+                UIManager:close(dialog)
+                self:showRelocateBook(grid, entry.path)
+            end } },
             { { text = _("Close"), id = "close", callback = function() UIManager:close(dialog) end } },
         },
     }
     UIManager:show(dialog)
+end
+
+function Bookshelf:showCategoryCoverPicker(grid, category)
+    local ok_menu, Menu = pcall(require, "ui/widget/menu")
+    if not ok_menu then self:_info(_("Category cover picker is unavailable.")) return end
+    local picker
+    local items = {{
+        text = (not category.cover_path and "✓ " or "") .. _("Use first available book"),
+        callback = function()
+            UIManager:close(picker)
+            local saved = self.store:setCategoryCover(category.id, nil)
+            if not saved then self:_info(_("Unable to save category cover.")) return end
+            if grid.context.kind == "root" then self:_refreshRoot(grid) else grid:updateItems(1, false) end
+        end,
+    }}
+    for _, path in ipairs(category.books) do
+        if lfs.attributes(path, "mode") == "file" then
+            local cover_path, book_name = path, basename(path)
+            items[#items + 1] = {
+                text = (category.cover_path == cover_path and "✓ " or "") .. book_name,
+                callback = function()
+                    UIManager:close(picker)
+                    local ok = self.store:setCategoryCover(category.id, cover_path)
+                    if not ok then self:_info(_("Unable to save category cover.")) return end
+                    if grid.context.kind == "root" then self:_refreshRoot(grid) else grid:updateItems(1, false) end
+                end,
+            }
+        end
+    end
+    picker = Menu:new{ title = _("Set category cover"), item_table = items }
+    UIManager:show(picker)
+end
+
+function Bookshelf:showRelocateBook(grid, old_path)
+    local ok, PathChooser = pcall(require, "ui/widget/pathchooser")
+    local ok_ffi, ffiUtil = pcall(require, "ffi/util")
+    if not ok or not ok_ffi then self:_info(_("File chooser is unavailable.")) return end
+    local start_path = ffiUtil.dirname(old_path)
+    if lfs.attributes(start_path, "mode") ~= "directory" then
+        start_path = G_reader_settings:readSetting("home_dir") or DataStorage:getDataDir()
+    end
+    local chooser
+    chooser = PathChooser:new{
+        title = _("Long-press the relocated book file"),
+        path = start_path,
+        select_directory = false,
+        select_file = true,
+        show_files = true,
+        file_filter = function(filename)
+            local supported_ok, supported = pcall(DocumentRegistry.hasProvider, DocumentRegistry, filename)
+            return supported_ok and supported
+        end,
+        onConfirm = function(new_path)
+            -- PathChooser closes itself after onConfirm returns. Show the
+            -- replacement confirmation on the next tick so its saved underlay
+            -- cannot repaint over the confirmation on an e-ink screen.
+            UIManager:nextTick(function()
+                if self._stopped then return end
+                if lfs.attributes(new_path, "mode") ~= "file" then
+                    self:_info(_("The selected book file is unavailable."))
+                    return
+                end
+                local supported_ok, supported = pcall(DocumentRegistry.hasProvider, DocumentRegistry, new_path)
+                if not supported_ok or not supported then
+                    self:_info(_("The selected file is not a supported book."))
+                    return
+                end
+                UIManager:show(ConfirmBox:new{
+                    text = _("Replace this missing path in every category? Original book files will not be moved or deleted."),
+                    ok_text = _("Relocate"),
+                    ok_callback = function()
+                        if self._stopped then return end
+                        local relocated, err = self.store:relocateBook(old_path, new_path)
+                        if not relocated then
+                            logger.warn("Bookshelf: relocate failed:", err)
+                            self:_info(_("Unable to update the bookshelf path."))
+                            return
+                        end
+                        self:_scan()
+                        local target_grid = grid and not grid._closed and grid or self.active_grid
+                        if target_grid and not target_grid._closed then self:_refreshBookGrid(target_grid) end
+                    end,
+                })
+            end)
+        end,
+    }
+    UIManager:show(chooser)
+end
+
+local function searchableText(value)
+    if type(value) == "table" then value = table.concat(value, " ") end
+    return string.lower(tostring(value or ""))
+end
+
+function Bookshelf:_searchCategoryEntries(query)
+    local entries = {}
+    for _, category in ipairs(self.store.data.categories) do
+        if searchableText(category.name):find(query, 1, true) then
+            entries[#entries + 1] = {
+                kind = "category", category_id = category.id, name = category.name,
+                path = self.store:firstValidBook(category), book_count = #category.books,
+            }
+        end
+    end
+    return entries
+end
+
+function Bookshelf:_bookMatchesSearch(entry, query)
+    local attr = lfs.attributes(entry.path) or {}
+    local metadata = self.store:getMetadata(entry.path, attr.modification)
+    local metadata_changed = false
+    if not metadata and attr.mode == "file" then
+        local bookinfo = self.ui and self.ui.bookinfo
+        if bookinfo and type(bookinfo.getDocProps) == "function" then
+            local props_ok, props = pcall(bookinfo.getDocProps, bookinfo, entry.path)
+            if props_ok and props then
+                metadata = {
+                    mtime = attr.modification,
+                    title = props.display_title or props.title or entry.name,
+                    authors = props.authors,
+                }
+                self.store:setMetadata(entry.path, metadata)
+                metadata_changed = true
+            end
+        end
+    end
+    metadata = metadata or {}
+    local haystack = table.concat({
+        searchableText(entry.name), searchableText(metadata.title), searchableText(metadata.authors),
+    }, "\n")
+    return haystack:find(query, 1, true) ~= nil, metadata_changed
+end
+
+function Bookshelf:_searchEntries(query)
+    query = searchableText(query)
+    local entries = self:_searchCategoryEntries(query)
+    local metadata_changed = false
+    for _, entry in ipairs(self:_bookEntries(self:_allKnownBookPaths())) do
+        local matches, changed = self:_bookMatchesSearch(entry, query)
+        if matches then entries[#entries + 1] = entry end
+        metadata_changed = metadata_changed or changed
+    end
+    if metadata_changed then self.store:flush() end
+    return entries
+end
+
+function Bookshelf:_startSearch(query, return_context, grid)
+    local display_query = query
+    query = searchableText(query)
+    local results = self:_searchCategoryEntries(query)
+    local books = self:_bookEntries(self:_allKnownBookPaths())
+    local index, metadata_changed = 1, false
+    local message = InfoMessage:new{ text = _("Searching bookshelf…") }
+    self._search_message = message
+    UIManager:show(message)
+    self._search_action = function()
+        if self._stopped then return end
+        local last = math.min(#books, index + 2)
+        while index <= last do
+            local entry = books[index]
+            local matches, changed = self:_bookMatchesSearch(entry, query)
+            if matches then results[#results + 1] = entry end
+            metadata_changed = metadata_changed or changed
+            index = index + 1
+        end
+        if index <= #books then
+            UIManager:scheduleIn(0.01, self._search_action)
+            return
+        end
+        self._search_action = nil
+        if metadata_changed then self.store:flush() end
+        if self._search_message then UIManager:close(self._search_message) self._search_message = nil end
+        if grid and not grid._closed then self:_closeGrid(grid, true, true) end
+        self:_showGrid(string.format(_("Search: %s"), display_query), results, {
+            kind = "search", query = display_query, return_context = return_context,
+        }, true, 1)
+    end
+    UIManager:nextTick(self._search_action)
+end
+
+function Bookshelf:showSearchDialog(grid)
+    grid = grid or self.active_grid
+    local return_context = grid and {
+        kind = grid.context.kind,
+        category_id = grid.context.category_id,
+        smart_id = grid.context.smart_id,
+        page = grid.page or 1,
+    } or { kind = "root", page = 1 }
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Search bookshelf"),
+        input_hint = _("Title, author, filename, or category"),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Search"), is_enter_default = true, callback = function()
+                local query = tostring(dialog:getInputText() or ""):match("^%s*(.-)%s*$")
+                if query == "" then return end
+                UIManager:close(dialog)
+                self:_scan()
+                self:_startSearch(query, return_context, grid)
+            end },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 function Bookshelf:showCategoryPicker(file, done)
@@ -669,8 +1008,13 @@ function Bookshelf:_refreshActiveGrid()
 end
 
 function Bookshelf:_set(path, value)
-    self.store:updateSetting(path, value)
-    self:_refreshActiveGrid()
+    local ok = self.store:updateSetting(path, value)
+    if not ok then self:_info(_("Unable to save bookshelf settings.")) return end
+    if path[1] == "smart_shelves_enabled" and self.active_grid then
+        self:_refreshBookGrid(self.active_grid)
+    else
+        self:_refreshActiveGrid()
+    end
     if path[1] == "progress_badge_background" then
         -- The KOReader main menu may cover the bookshelf while this setting
         -- changes. Mark every stacked widget dirty so closing/collapsing the
@@ -763,6 +1107,13 @@ end
 
 function Bookshelf:_settingsMenu()
     return {
+        {
+            text = _("Smart Shelf"),
+            checked_func = function() return self.store:getSettings().smart_shelves_enabled end,
+            callback = function()
+                self:_set({ "smart_shelves_enabled" }, not self.store:getSettings().smart_shelves_enabled)
+            end,
+        },
         { text = _("Category assignment"), sub_item_table = {
             {
                 text = _("Apply after confirmation"), radio = true,
@@ -810,6 +1161,7 @@ function Bookshelf:addToMainMenu(menu_items)
         text = _("Bookshelf"),
         sub_item_table = {
             { text = _("Open bookshelf"), callback = function() self:showRoot() end },
+            { text = _("Search bookshelf"), callback = function() self:showSearchDialog(self.active_grid) end },
             {
                 text = _("Open bookshelf at startup"),
                 checked_func = function() return self.store:getSettings().startup_open end,
@@ -831,6 +1183,7 @@ function Bookshelf:addToMainMenu(menu_items)
                         message = message .. "\n" .. string.format(_("Kept %d records outside the active library root."), skipped)
                     end
                     self:_info(message)
+                    self:_scan()
                     if self.active_grid then self:_refreshBookGrid(self.active_grid) end
                 end,
             },
@@ -848,6 +1201,8 @@ end
 
 function Bookshelf:stopPlugin()
     self._stopped = true
+    if self._search_action then UIManager:unschedule(self._search_action) self._search_action = nil end
+    if self._search_message then pcall(UIManager.close, UIManager, self._search_message) self._search_message = nil end
     -- FileManager teardown is part of opening a reader. Keep the one-shot
     -- return context in that case; clear it for a real disable/exit.
     if not (self.ui and self.ui.tearing_down) then
@@ -872,7 +1227,7 @@ function Bookshelf:stopPlugin()
         pcall(UIManager.close, UIManager, self.active_grid)
         self.active_grid = nil
     end
-    self.store:flush()
+    if self.store._metadata_dirty then self.store:flush() end
     return true
 end
 

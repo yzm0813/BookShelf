@@ -442,9 +442,14 @@ local Grid = BookList:extend{
 }
 
 function Grid:init()
+    -- Menu:init() resets page to 1. Preserve the requested/current page across
+    -- reader return and orientation-driven widget reinitialization.
+    self._requested_page = math.max(1, tonumber(self.page) or 1)
     self.settings = self.store:getSettings()
     self._pending, self._pending_keys = {}, {}
+    self._failed_keys = self._failed_keys or {}
     BookList.init(self)
+    self._requested_page = nil
     self:_installSortButton()
 end
 
@@ -525,6 +530,7 @@ function Grid:_recalculateDimen()
     self.nb_rows = self.settings.rows_per_page
     self.perpage = self.nb_cols * self.nb_rows
     self.page_num = math.max(1, math.ceil(#self.item_table / self.perpage))
+    if self._requested_page then self.page = self._requested_page end
     if self.page > self.page_num then self.page = self.page_num end
     local top_h = self.title_bar and self.title_bar.dimen.h or 0
     local footer_h = self.page_info and self.page_info:getSize().h or Screen:scaleBySize(36)
@@ -538,9 +544,9 @@ end
 
 function Grid:_queueExtraction(path, spec)
     local key = self.cache:key(path, spec)
-    if not self._pending_keys[key] then
+    if not self._pending_keys[key] and not self._failed_keys[key] then
         self._pending_keys[key] = true
-        self._pending[#self._pending + 1] = { path = path, spec = spec }
+        self._pending[#self._pending + 1] = { path = path, spec = spec, key = key }
     end
 end
 
@@ -585,7 +591,8 @@ function Grid:_startExtraction()
         local job = table.remove(queue, 1)
         if not job then
             self.extract_action = nil
-            self.store:flush()
+            local saved, save_err = self.store:flush()
+            if not saved then logger.warn("Bookshelf: metadata cache save failed:", save_err) end
             self.cache:prune(400)
             self:updateItems(1, true)
             return
@@ -599,7 +606,11 @@ function Grid:_startExtraction()
         end
         metadata.title = metadata.title or filemanagerutil.splitFileNameType(job.path:match("([^/]+)$"))
         local output, reason, cover_ratio = self.cache:generate(job.path, job.spec)
-        metadata.cover_missing = not output
+        -- A real "no cover" result is stable for this file mtime. Rendering,
+        -- allocation, or storage failures are transient: avoid an immediate
+        -- retry loop on this Grid, but retry when the shelf is opened again.
+        metadata.cover_missing = reason == "no_cover"
+        if not output and reason ~= "no_cover" then self._failed_keys[job.key] = true end
         metadata.cover_ratio = cover_ratio
         self.store:setMetadata(job.path, metadata)
         if reason and reason ~= "no_cover" then logger.warn("Bookshelf: thumbnail generation failed:", job.path, reason) end
