@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <path d="M5 19h14M7 19V7h4v12M13 19V9h4v10"
+  <path d="M4 6h12M4 12h9M4 18h6M18 9v9m0 0-3-3m3 3 3-3"
         fill="none" stroke="#000000" stroke-width="1.8"
         stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

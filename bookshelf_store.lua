@@ -14,6 +14,7 @@ local DEFAULTS = {
     settings = {
         startup_open = false,
         confirm_category_assignment = true,
+        book_sort = "manual",
         columns_portrait = 3,
         columns_landscape = 5,
         rows_per_page = 2,
@@ -65,6 +66,15 @@ function Store:new(path)
 end
 
 function Store:_sanitize()
+    local valid_book_sort = {
+        manual = true,
+        name = true,
+        modification = true,
+        last_read = true,
+    }
+    if not valid_book_sort[self.data.settings.book_sort] then
+        self.data.settings.book_sort = "manual"
+    end
     local seen_ids = {}
     for i = #self.data.categories, 1, -1 do
         local category = self.data.categories[i]

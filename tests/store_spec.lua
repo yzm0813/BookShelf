@@ -76,6 +76,8 @@ store:updateSetting({ "columns_landscape" }, 6)
 assert(store:getSettings().columns_landscape == 6)
 assert(store:getSettings().confirm_category_assignment == true,
     "confirmed assignment must be the safe default")
+assert(store:getSettings().book_sort == "manual",
+    "existing installs must retain their saved manual category order")
 
 local before_batch = flush_count
 assert(store:applyBookCategories("/books/a.epub", { [science.id] = true }, { "New shelf" }))

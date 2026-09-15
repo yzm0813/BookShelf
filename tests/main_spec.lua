@@ -35,8 +35,17 @@ package.preload["apps/filemanager/filemanagerutil"] = function()
         end,
     }
 end
+local file_attrs = {
+    ["/books/alpha.epub"] = { mode = "file", modification = 10 },
+    ["/books/beta.epub"] = { mode = "file", modification = 30 },
+    ["/books/gamma.epub"] = { mode = "file", modification = 20 },
+}
 package.preload["libs/libkoreader-lfs"] = function()
-    return { attributes = function() return "file" end }
+    return { attributes = function(path, key)
+        local attr = file_attrs[path]
+        if not attr then return nil end
+        return key and attr[key] or attr
+    end }
 end
 package.preload["logger"] = function()
     return { info = function() end, warn = function() end, err = function() end }
@@ -74,6 +83,43 @@ for _, entry in ipairs(entries) do
     assert(entry.kind ~= "uncategorized", "uncategorized grouping card must not return")
 end
 
+local sort_settings = { hide_missing = false, book_sort = "name" }
+local sort_shelf = setmetatable({
+    store = { getSettings = function() return sort_settings end },
+}, Bookshelf)
+local sorted = sort_shelf:_bookEntries({
+    "/books/gamma.epub", "/books/beta.epub", "/books/alpha.epub",
+})
+assert(sorted[1].path == "/books/alpha.epub" and sorted[3].path == "/books/gamma.epub",
+    "name sorting must be ascending")
+
+sort_settings.book_sort = "modification"
+sorted = sort_shelf:_bookEntries({
+    "/books/alpha.epub", "/books/gamma.epub", "/books/beta.epub",
+})
+assert(sorted[1].path == "/books/beta.epub" and sorted[3].path == "/books/alpha.epub",
+    "file modification sorting must put newest first")
+
+package.preload["readhistory"] = function()
+    return { hist = {
+        { file = "/books/alpha.epub", time = 200 },
+        { file = "/books/beta.epub", time = 100 },
+    } }
+end
+sort_settings.book_sort = "last_read"
+sorted = sort_shelf:_bookEntries({
+    "/books/gamma.epub", "/books/beta.epub", "/books/alpha.epub",
+})
+assert(sorted[1].path == "/books/alpha.epub" and sorted[3].path == "/books/gamma.epub",
+    "last-read sorting must use KOReader history and put unread books last")
+
+sort_settings.book_sort = "manual"
+sorted = sort_shelf:_bookEntries({
+    "/books/gamma.epub", "/books/alpha.epub", "/books/beta.epub",
+})
+assert(sorted[1].path == "/books/gamma.epub" and sorted[3].path == "/books/beta.epub",
+    "manual mode must preserve stored category order")
+
 local registered, unregistered
 local simpleui_actions = {}
 package.preload["infra/sui_config"] = function()
@@ -103,6 +149,8 @@ assert(#simpleui_actions == 1 and simpleui_actions[1].id == "bookshelf_open",
 assert(bi_registered.id == "bookshelf_grid_nav")
 assert(bi_registered.widget_name == "bookshelf_grid")
 assert(bi_registered.active_action_id == "bookshelf_open")
+assert(type(bi_registered.on_inject) == "function",
+    "Simple UI injection must reposition the neighboring sort button")
 assert(shelf:_activateSimpleUIBookshelf())
 assert(live_simpleui.active_action == "bookshelf_open",
     "bookshelf must seed the active tab before its grid is injected")
@@ -111,4 +159,4 @@ assert(unregistered == "bookshelf_open", "Simple UI action must be removed on pl
 assert(bi_unregistered == "bookshelf_grid_nav", "Simple UI page registration must be removed")
 assert(#simpleui_actions == 0, "Simple UI icon picker catalogue entry must be removed on stop")
 
-print("PASS main_spec: flat root, prepaint tab activation, and Simple UI lifecycle")
+print("PASS main_spec: root layout, book sorting, and Simple UI lifecycle")

@@ -10,6 +10,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
+local IconButton = require("ui/widget/iconbutton")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
@@ -29,6 +30,9 @@ local logger = require("logger")
 local _ = require("bookshelf_i18n")
 
 local Screen = Device.screen
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local plugin_dir = source_path:match("^(.*)[/\\]bookshelf_grid%.lua$") or "."
+local SORT_ICON = plugin_dir .. "/icons/sort.svg"
 
 -- FrameContainer paints its border before its child. On cover images that can
 -- let the child overwrite anti-aliased corner pixels. CoverFrame deliberately
@@ -431,6 +435,78 @@ function Grid:init()
     self.settings = self.store:getSettings()
     self._pending, self._pending_keys = {}, {}
     BookList.init(self)
+    self:_installSortButton()
+end
+
+function Grid:_installSortButton()
+    local title_bar = self.title_bar
+    local action_button = title_bar and title_bar.left_button
+    if not action_button then return end
+
+    -- The stock TitleBar deliberately gives its left button an oversized
+    -- right-hand tap zone. A neighboring button would sit inside that zone,
+    -- so make the action button's horizontal hit area symmetrical first.
+    action_button.padding_right = action_button.padding_left or title_bar.button_padding or 0
+    action_button:update()
+
+    local icon_size = action_button.width
+        or (action_button.image and action_button.image:getSize().w)
+        or Screen:scaleBySize(36)
+    local button = IconButton:new{
+        icon = "appbar.menu",
+        width = icon_size,
+        height = icon_size,
+        padding = 0,
+        show_parent = self,
+        callback = function() self.plugin:showSortDialog(self) end,
+    }
+    button.icon = nil
+    button.image.icon = nil
+    button.image.file = SORT_ICON
+    pcall(button.image.free, button.image)
+    pcall(button.image.init, button.image)
+    button:update()
+    table.insert(title_bar, button)
+    self.sort_button = button
+    self:positionSortButton()
+end
+
+-- Keep the sort control adjacent to the + button. Simple UI may move the
+-- native button to a configurable title-bar slot; its Bar Injection callback
+-- calls this again after that move, without patching either plugin.
+function Grid:positionSortButton()
+    local title_bar, button = self.title_bar, self.sort_button
+    local action_button = title_bar and title_bar.left_button
+    if not (title_bar and button and action_button) then return end
+
+    local image_size = action_button.image and action_button.image:getSize()
+    local icon_size = image_size and image_size.w or action_button.width or Screen:scaleBySize(36)
+    if button.width ~= icon_size then
+        button.width, button.height = icon_size, icon_size
+        button.image.width, button.image.height = icon_size, icon_size
+        pcall(button.image.free, button.image)
+        pcall(button.image.init, button.image)
+        button:update()
+    end
+
+    local padding_left = action_button.padding_left or 0
+    local padding_top = action_button.padding_top or 0
+    local base_x
+    if action_button.overlap_offset and action_button.overlap_offset[1] then
+        base_x = action_button.overlap_offset[1] + padding_left
+    elseif action_button.overlap_align == "right" then
+        base_x = Screen:getWidth() - action_button:getSize().w + padding_left
+    else
+        base_x = padding_left
+    end
+    local gap = Screen:scaleBySize(10)
+    local x = base_x > Screen:getWidth() / 2
+        and base_x - icon_size - gap
+        or base_x + icon_size + gap
+    x = math.max(0, math.min(Screen:getWidth() - icon_size, x))
+    button.overlap_align = nil
+    button.overlap_offset = { x, padding_top }
+    title_bar:resetLayout()
 end
 
 function Grid:_recalculateDimen()

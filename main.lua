@@ -106,6 +106,11 @@ function Bookshelf:_registerSimpleUIAction()
             widget_name = "bookshelf_grid",
             active_action_id = SIMPLEUI_ACTION_ID,
             is_pageable = true,
+            on_inject = function(widget)
+                if widget and type(widget.positionSortButton) == "function" then
+                    widget:positionSortButton()
+                end
+            end,
         }
         self._simpleui_core = Core
     end
@@ -239,8 +244,21 @@ end
 
 function Bookshelf:_bookEntries(paths, category_id)
     local entries = {}
+    local sort_mode = self.store:getSettings().book_sort or "manual"
+    local last_read = {}
+    if sort_mode == "last_read" then
+        local ok, history = pcall(require, "readhistory")
+        if ok and history and type(history.hist) == "table" then
+            for _, item in ipairs(history.hist) do
+                if type(item.file) == "string" then
+                    last_read[item.file] = tonumber(item.time) or 0
+                end
+            end
+        end
+    end
     for _, path in ipairs(paths) do
-        local exists = lfs.attributes(path, "mode") == "file"
+        local attr = lfs.attributes(path) or {}
+        local exists = attr.mode == "file"
         if exists or not self.store:getSettings().hide_missing then
             entries[#entries + 1] = {
                 kind = "book",
@@ -248,8 +266,22 @@ function Bookshelf:_bookEntries(paths, category_id)
                 name = basename(path),
                 category_id = category_id,
                 missing = not exists,
+                sort_modification = tonumber(attr.modification) or 0,
+                sort_last_read = last_read[path] or 0,
             }
         end
+    end
+    if sort_mode ~= "manual" then
+        table.sort(entries, function(a, b)
+            if sort_mode == "modification" and a.sort_modification ~= b.sort_modification then
+                return a.sort_modification > b.sort_modification
+            elseif sort_mode == "last_read" and a.sort_last_read ~= b.sort_last_read then
+                return a.sort_last_read > b.sort_last_read
+            end
+            local an, bn = string.lower(a.name or ""), string.lower(b.name or "")
+            if an ~= bn then return an < bn end
+            return (a.path or "") < (b.path or "")
+        end)
     end
     return entries
 end
@@ -356,6 +388,36 @@ function Bookshelf:onGridAction(grid)
     else
         self:_info(_("Long-press a book to add it to a category."))
     end
+end
+
+function Bookshelf:showSortDialog(grid)
+    local dialog
+    local choices = {
+        { _("Manual order"), "manual" },
+        { _("Name"), "name" },
+        { _("File modification time (newest first)"), "modification" },
+        { _("Last read time (newest first)"), "last_read" },
+    }
+    local buttons = {}
+    local current = self.store:getSettings().book_sort or "manual"
+    for _, choice in ipairs(choices) do
+        local label, value = choice[1], choice[2]
+        buttons[#buttons + 1] = {{
+            text = (current == value and "✓ " or "") .. label,
+            callback = function()
+                UIManager:close(dialog)
+                if current == value then return end
+                self.store:updateSetting({ "book_sort" }, value)
+                grid.page = 1
+                self:_refreshBookGrid(grid)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = _("Sort books"),
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
 end
 
 function Bookshelf:onGridHold(grid, entry)
