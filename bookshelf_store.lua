@@ -13,6 +13,7 @@ local DEFAULTS = {
     metadata = {},
     settings = {
         startup_open = false,
+        confirm_category_assignment = true,
         columns_portrait = 3,
         columns_landscape = 5,
         rows_per_page = 2,
@@ -206,6 +207,45 @@ function Store:categoryIdsForBook(path)
         end
     end
     return result
+end
+
+-- Apply the complete category membership for one book in a single settings
+-- write. New category names are committed as selected categories. This is the
+-- transaction boundary used by the confirm-mode category picker.
+function Store:applyBookCategories(path, selected_ids, new_category_names)
+    path = normalized(path)
+    if not path then return nil, "invalid_path" end
+    selected_ids = type(selected_ids) == "table" and selected_ids or {}
+    new_category_names = type(new_category_names) == "table" and new_category_names or {}
+
+    local clean_names = {}
+    for _, name in ipairs(new_category_names) do
+        name = tostring(name or ""):match("^%s*(.-)%s*$")
+        if name == "" then return nil, "empty_name" end
+        clean_names[#clean_names + 1] = name
+    end
+
+    local before = clone(self.data.categories)
+    for _, category in ipairs(self.data.categories) do
+        local _, index = self:hasBook(category.id, path)
+        if selected_ids[category.id] then
+            if not index then category.books[#category.books + 1] = path end
+        elseif index then
+            table.remove(category.books, index)
+        end
+    end
+    for _, name in ipairs(clean_names) do
+        local category = { id = self:_newId(), name = name, books = { path } }
+        self.data.categories[#self.data.categories + 1] = category
+    end
+
+    local ok, err = self:flush()
+    if not ok then
+        self.data.categories = before
+        self.db.data = self.data
+        return nil, err
+    end
+    return true
 end
 
 function Store:firstValidBook(category)

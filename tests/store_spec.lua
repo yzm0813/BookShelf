@@ -1,5 +1,5 @@
 -- Host-side model test. KOReader dependencies are replaced with minimal fakes.
-local persisted = {}
+local persisted, flush_count = {}, 0
 local existing = {
     ["/books/a.epub"] = true,
     ["/books/b.epub"] = true,
@@ -14,7 +14,7 @@ package.preload["luasettings"] = function()
     local M = {}
     function M:open(path)
         local object = { data = persisted[path] or {} }
-        function object:flush() persisted[path] = self.data return self end
+        function object:flush() persisted[path] = self.data flush_count = flush_count + 1 return self end
         return object
     end
     return M
@@ -74,4 +74,20 @@ assert(existing["/books/a.epub"], "deleting a category must not delete a book")
 
 store:updateSetting({ "columns_landscape" }, 6)
 assert(store:getSettings().columns_landscape == 6)
-print("PASS store_spec: 17 assertions")
+assert(store:getSettings().confirm_category_assignment == true,
+    "confirmed assignment must be the safe default")
+
+local before_batch = flush_count
+assert(store:applyBookCategories("/books/a.epub", { [science.id] = true }, { "New shelf" }))
+assert(flush_count == before_batch + 1, "confirmed changes must flush exactly once")
+assert(store:hasBook(science.id, "/books/a.epub"))
+assert(#store.data.categories == 2 and store.data.categories[2].name == "New shelf")
+assert(store:hasBook(store.data.categories[2].id, "/books/a.epub"),
+    "staged categories must be created with the book assigned")
+
+before_batch = flush_count
+assert(store:applyBookCategories("/books/a.epub", {}, {}))
+assert(flush_count == before_batch + 1)
+assert(not store:hasBook(science.id, "/books/a.epub"))
+assert(not store:hasBook(store.data.categories[2].id, "/books/a.epub"))
+print("PASS store_spec: transactional category assignment")

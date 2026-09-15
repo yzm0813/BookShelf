@@ -19,7 +19,7 @@ local Cache = require("bookshelf_covercache")
 local cache = Cache:new({}, {})
 local base = { w = 120, h = 180, mode = "crop", ratio = "2:3", radius = 8 }
 local key = cache:key("/books/a.epub", base)
-assert(key:match("^2\31"), "render version must invalidate thumbnails from the old border geometry")
+assert(key:match("^3\31"), "render version must invalidate thumbnails from the old border geometry")
 
 local variants = {
     { w = 121, h = 180, mode = "crop", ratio = "2:3", radius = 8 },

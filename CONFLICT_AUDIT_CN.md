@@ -16,6 +16,6 @@ Simple UI 在 `main.lua:928-949` 首次运行时写全局 `start_with=homescreen
 
 ## Bookshelf 的避让结果
 
-Bookshelf 没有给 FileChooser、FileManager、CoverBrowser、History、Collections 或 FileSearcher 的类/实例方法赋值；长按注册键为 `bookshelf_add_to_shelf`。检测到 Simple UI 时，插件通过其公开的 `QA.register` 注册 `bookshelf_open` 候选动作，禁用时分别按原键和动作 ID 清理。插件只读全局 `home_dir` 与 `language`，不会写 `start_with`、`simpleui_bar_tabs`、其他 `simpleui_*` 设置、CoverBrowser SQLite 配置或两个插件的文件。启动书架使用自身布尔设置和 `FileManager.registerPostInitCallback`；默认关闭，回调异常由 `pcall` 捕获并仅写日志。
+Bookshelf 没有给 FileChooser、FileManager、CoverBrowser、History、Collections 或 FileSearcher 的类/实例方法赋值；长按注册键为 `bookshelf_add_to_shelf`。检测到 Simple UI 时，插件通过其公开的 `QA.register` 注册 `bookshelf_open` 候选动作，并通过 `sui_core.BarInjection.register` 声明 `bookshelf_grid` 页面；禁用时按原 ID 全部清理。插件只读全局 `home_dir` 与 `language`，不会写 `start_with`、`simpleui_bar_tabs`、其他 `simpleui_*` 设置、CoverBrowser SQLite 配置或两个插件的文件。阅读返回上下文只放在 UIManager 的进程内存中，KOReader 重启后自动消失。启动书架使用自身布尔设置和 `FileManager.registerPostInitCallback`；默认关闭，回调异常由 `pcall` 捕获并仅写日志。
 
 这消除了方法保存/恢复顺序冲突：无论三个插件按什么路径顺序加载，Bookshelf 都不成为现有 monkey-patch 链的一层，禁用它也不会把 FileChooser/FileManager 恢复到错误版本。

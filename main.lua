@@ -20,6 +20,7 @@ local Scanner = require("bookshelf_scanner")
 local Store = require("bookshelf_store")
 
 local SIMPLEUI_ACTION_ID = "bookshelf_open"
+local SIMPLEUI_BAR_INJECTION_ID = "bookshelf_grid_nav"
 local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
 local plugin_dir = source_path:match("^(.*)[/\\]main%.lua$")
     or (DataStorage:getDataDir() .. "/plugins/bookshelf.koplugin")
@@ -45,7 +46,19 @@ function Bookshelf:init()
     if not self.ui.document then
         self:_registerFileDialogButton()
         self:_scheduleSimpleUIRegistration()
-        if self.store:getSettings().startup_open and type(self.ui.registerPostInitCallback) == "function" then
+        local return_context = UIManager._bookshelf_reader_return
+        if return_context then UIManager._bookshelf_reader_return = nil end
+        if return_context and type(self.ui.registerPostInitCallback) == "function" then
+            self.ui:registerPostInitCallback(function()
+                UIManager:scheduleIn(0.2, function()
+                    if self._stopped then return end
+                    local category = return_context.category_id
+                        and self.store:getCategory(return_context.category_id)
+                    if category then self:showCategory(category.id, return_context.page)
+                    else self:showRoot(return_context.page) end
+                end)
+            end)
+        elseif self.store:getSettings().startup_open and type(self.ui.registerPostInitCallback) == "function" then
             self.ui:registerPostInitCallback(function()
                 UIManager:scheduleIn(0.2, function()
                     if self._stopped then return end
@@ -78,6 +91,20 @@ function Bookshelf:_registerSimpleUIAction()
         end,
     }
     self._simpleui_qa = QA
+    local Core = package.loaded["infra/sui_core"]
+    if not Core then
+        local ok, module = pcall(require, "infra/sui_core")
+        if ok then Core = module end
+    end
+    if Core and Core.BarInjection and type(Core.BarInjection.register) == "function" then
+        Core.BarInjection.register{
+            id = SIMPLEUI_BAR_INJECTION_ID,
+            widget_name = "bookshelf_grid",
+            active_action_id = SIMPLEUI_ACTION_ID,
+            is_pageable = true,
+        }
+        self._simpleui_core = Core
+    end
     logger.info("Bookshelf: registered Simple UI bottom-bar candidate", SIMPLEUI_ACTION_ID)
     return true
 end
@@ -171,14 +198,24 @@ function Bookshelf:_bookEntries(paths, category_id)
     return entries
 end
 
-function Bookshelf:_showGrid(title, entries, context, return_to_root)
-    local grid = Grid:new{
+function Bookshelf:_showGrid(title, entries, context, return_to_root, initial_page)
+    local grid
+    local function return_to_parent()
+        if not grid or grid._bookshelf_returning then return true end
+        grid._bookshelf_returning = true
+        self:_closeGrid(grid, true, true)
+        self:showRoot()
+        return true
+    end
+    grid = Grid:new{
         title = title,
         item_table = entries,
         plugin = self,
         store = self.store,
         cache = self.cache,
         context = context,
+        page = math.max(1, tonumber(initial_page) or 1),
+        onReturn = return_to_root and return_to_parent or nil,
         close_callback = return_to_root and function()
             if not grid._skip_return and not self._stopped then self:showRoot() end
         end or nil,
@@ -188,26 +225,27 @@ function Bookshelf:_showGrid(title, entries, context, return_to_root)
     return grid
 end
 
-function Bookshelf:showRoot()
+function Bookshelf:showRoot(page)
     self:_scan()
-    return self:_showGrid(_("Bookshelf"), self:_rootEntries(), { kind = "root" }, false)
+    return self:_showGrid(_("Bookshelf"), self:_rootEntries(), { kind = "root" }, false, page)
 end
 
-function Bookshelf:showCategory(category_id)
+function Bookshelf:showCategory(category_id, page)
     local category = self.store:getCategory(category_id)
     if not category then return self:showRoot() end
     return self:_showGrid(category.name, self:_bookEntries(category.books, category.id),
-        { kind = "category", category_id = category.id }, true)
+        { kind = "category", category_id = category.id }, true, page)
 end
 
-function Bookshelf:_closeGrid(grid, skip_return)
+function Bookshelf:_closeGrid(grid, skip_return, keep_nav)
     if grid then grid._skip_return = skip_return end
+    if grid and keep_nav then grid._navbar_closing_intentionally = true end
     if grid then UIManager:close(grid) end
 end
 
 function Bookshelf:onGridSelect(grid, entry)
     if entry.kind == "category" then
-        self:_closeGrid(grid, true)
+        self:_closeGrid(grid, true, true)
         self:showCategory(entry.category_id)
     elseif entry.kind == "book" then
         if self._opening_book then return end
@@ -223,18 +261,30 @@ function Bookshelf:onGridSelect(grid, entry)
         -- otherwise race the menu close/refresh path.
         local book_path = entry.path
         self._opening_book = true
+        local return_context = {
+            category_id = grid.context.kind == "category" and grid.context.category_id or nil,
+            page = grid.page or 1,
+        }
+        UIManager._bookshelf_reader_return = return_context
         UIManager:broadcastEvent(Event:new("SetupShowReader"))
-        self:_closeGrid(grid, true)
+        self:_closeGrid(grid, true, true)
         UIManager:nextTick(function()
             local ok, err = pcall(filemanagerutil.openFile, self.ui, book_path, nil, true)
             self._opening_book = nil
             if not ok then
+                if UIManager._bookshelf_reader_return == return_context then
+                    UIManager._bookshelf_reader_return = nil
+                end
                 -- SetupShowReader only marks FileManager as tearing down. If
                 -- opening fails before ShowingReader closes it, make the
                 -- existing FileManager usable again and report the error.
                 if self.ui then self.ui.tearing_down = nil end
                 logger.err("Bookshelf: failed to open original book:", book_path, err)
                 self:_info(_("Unable to open the original book file."))
+                local category = return_context.category_id
+                    and self.store:getCategory(return_context.category_id)
+                if category then self:showCategory(category.id, return_context.page)
+                else self:showRoot(return_context.page) end
             end
         end)
     end
@@ -299,6 +349,25 @@ function Bookshelf:promptCreateCategory(done)
     dialog:onShowKeyboard()
 end
 
+function Bookshelf:promptStagedCategory(done)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Create category"),
+        input_hint = _("Category name"),
+        buttons = {{
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Create"), is_enter_default = true, callback = function()
+                local name = tostring(dialog:getInputText() or ""):match("^%s*(.-)%s*$")
+                if name == "" then self:_info(_("Category name cannot be empty.")) return end
+                UIManager:close(dialog)
+                done(name)
+            end },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
 function Bookshelf:promptRenameCategory(grid, category)
     local dialog
     dialog = InputDialog:new{
@@ -341,7 +410,7 @@ function Bookshelf:showCategoryActions(grid, category)
                         ok_callback = function()
                             self.store:deleteCategory(category.id)
                             if grid.context.kind == "root" then self:_refreshRoot(grid)
-                            else self:_closeGrid(grid, true) self:showRoot() end
+                            else self:_closeGrid(grid, true, true) self:showRoot() end
                         end,
                     }
                     UIManager:show(confirm)
@@ -388,14 +457,44 @@ function Bookshelf:showBookActions(grid, entry)
 end
 
 function Bookshelf:showCategoryPicker(file, done)
-    if #self.store.data.categories == 0 then
+    if #self.store.data.categories == 0
+            and not self.store:getSettings().confirm_category_assignment then
         self:promptCreateCategory(function(category)
             self.store:addBook(category.id, file)
             if done then done() end
         end)
         return
     end
+    if not self.store:getSettings().confirm_category_assignment then
+        local membership = self.store:categoryIdsForBook(file)
+        local buttons, dialog = {}, nil
+        for _, category in ipairs(self.store.data.categories) do
+            local category_id, category_name = category.id, category.name
+            buttons[#buttons + 1] = {{
+                text = (membership[category_id] and "☒ " or "☐ ") .. category_name,
+                callback = function()
+                    UIManager:close(dialog)
+                    if membership[category_id] then self.store:removeBook(category_id, file)
+                    else self.store:addBook(category_id, file) end
+                    if done then done() end
+                end,
+            }}
+        end
+        buttons[#buttons + 1] = {{ text = _("New category"), callback = function()
+            UIManager:close(dialog)
+            self:promptCreateCategory(function(category)
+                self.store:addBook(category.id, file)
+                if done then done() end
+            end)
+        end }}
+        dialog = ButtonDialog:new{ title = basename(file), buttons = buttons }
+        UIManager:show(dialog)
+        return
+    end
+
     local membership = self.store:categoryIdsForBook(file)
+    local staged = {}
+    local function show_confirm_picker()
     local buttons = {}
     local dialog
     for _, category in ipairs(self.store.data.categories) do
@@ -405,25 +504,42 @@ function Bookshelf:showCategoryPicker(file, done)
             text = (membership[category_id] and "☒ " or "☐ ") .. category_name,
             callback = function()
                 UIManager:close(dialog)
-                if membership[category_id] then self.store:removeBook(category_id, file)
-                else self.store:addBook(category_id, file) end
-                if done then done() end
-                self:showCategoryPicker(file, done)
+                membership[category_id] = not membership[category_id]
+                show_confirm_picker()
+            end,
+        }}
+    end
+    for index, name in ipairs(staged) do
+        local staged_index = index
+        buttons[#buttons + 1] = {{
+            text = "☒ " .. name,
+            callback = function()
+                UIManager:close(dialog)
+                table.remove(staged, staged_index)
+                show_confirm_picker()
             end,
         }}
     end
     buttons[#buttons + 1] = {
         { text = _("New category"), callback = function()
             UIManager:close(dialog)
-            self:promptCreateCategory(function(category)
-                self.store:addBook(category.id, file)
-                if done then done() end
+            self:promptStagedCategory(function(name)
+                staged[#staged + 1] = name
+                show_confirm_picker()
             end)
         end },
-        { text = _("Done"), id = "close", callback = function() UIManager:close(dialog) if done then done() end end },
+        { text = _("Done"), callback = function()
+            local ok = self.store:applyBookCategories(file, membership, staged)
+            if not ok then self:_info(_("Unable to save category changes.")) return end
+            UIManager:close(dialog)
+            if done then done() end
+        end },
+        { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
     }
     dialog = ButtonDialog:new{ title = basename(file), buttons = buttons }
     UIManager:show(dialog)
+    end
+    show_confirm_picker()
 end
 
 function Bookshelf:_refreshActiveGrid()
@@ -522,6 +638,18 @@ end
 
 function Bookshelf:_settingsMenu()
     return {
+        { text = _("Category assignment"), sub_item_table = {
+            {
+                text = _("Apply after confirmation"), radio = true,
+                checked_func = function() return self.store:getSettings().confirm_category_assignment end,
+                callback = function() self:_set({ "confirm_category_assignment" }, true) end,
+            },
+            {
+                text = _("Apply immediately after selection"), radio = true,
+                checked_func = function() return not self.store:getSettings().confirm_category_assignment end,
+                callback = function() self:_set({ "confirm_category_assignment" }, false) end,
+            },
+        } },
         { text = _("Cover scale presets"), sub_item_table = self:_radioItems({ "cover_scale_percent" }, {
             { "50%", 50 }, { "75%", 75 }, { "100%", 100 },
         }) },
@@ -592,9 +720,19 @@ end
 
 function Bookshelf:stopPlugin()
     self._stopped = true
+    -- FileManager teardown is part of opening a reader. Keep the one-shot
+    -- return context in that case; clear it for a real disable/exit.
+    if not (self.ui and self.ui.tearing_down) then
+        UIManager._bookshelf_reader_return = nil
+    end
     if self._simpleui_qa and type(self._simpleui_qa.unregister) == "function" then
         pcall(self._simpleui_qa.unregister, SIMPLEUI_ACTION_ID)
         self._simpleui_qa = nil
+    end
+    if self._simpleui_core and self._simpleui_core.BarInjection
+            and type(self._simpleui_core.BarInjection.unregister) == "function" then
+        pcall(self._simpleui_core.BarInjection.unregister, SIMPLEUI_BAR_INJECTION_ID)
+        self._simpleui_core = nil
     end
     if self._file_button_registered and self.ui and type(self.ui.removeFileDialogButtons) == "function" then
         pcall(self.ui.removeFileDialogButtons, self.ui, "bookshelf_add_to_shelf")

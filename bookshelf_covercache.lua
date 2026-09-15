@@ -9,7 +9,7 @@ local util = require("util")
 
 local CoverCache = {}
 CoverCache.__index = CoverCache
-local RENDER_VERSION = 2
+local RENDER_VERSION = 3
 
 function CoverCache:new(ui, store)
     local o = setmetatable({}, self)

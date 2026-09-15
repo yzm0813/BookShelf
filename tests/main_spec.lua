@@ -78,12 +78,23 @@ local QA = {
     unregister = function(id) unregistered = id end,
 }
 package.loaded["features/sui_quickactions"] = QA
+local bi_registered, bi_unregistered
+package.loaded["infra/sui_core"] = {
+    BarInjection = {
+        register = function(desc) bi_registered = desc end,
+        unregister = function(id) bi_unregistered = id end,
+    },
+}
 assert(shelf:_registerSimpleUIAction())
 assert(registered.id == "bookshelf_open")
 assert(registered.label == "Bookshelf")
 assert(registered.is_in_place == false)
 assert(type(registered.execute) == "function")
+assert(bi_registered.id == "bookshelf_grid_nav")
+assert(bi_registered.widget_name == "bookshelf_grid")
+assert(bi_registered.active_action_id == "bookshelf_open")
 shelf:stopPlugin()
 assert(unregistered == "bookshelf_open", "Simple UI action must be removed on plugin stop")
+assert(bi_unregistered == "bookshelf_grid_nav", "Simple UI page registration must be removed")
 
-print("PASS main_spec: flat root and Simple UI action lifecycle")
+print("PASS main_spec: flat root and Simple UI action/page lifecycle")

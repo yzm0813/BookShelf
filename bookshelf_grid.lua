@@ -23,11 +23,36 @@ local UIManager = require("ui/uimanager")
 local UnderlineContainer = require("ui/widget/container/underlinecontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 
 local Screen = Device.screen
+
+-- FrameContainer paints its border before its child. On cover images that can
+-- let the child overwrite anti-aliased corner pixels. CoverFrame deliberately
+-- paints background, inset content, then the border as the final layer.
+local CoverFrame = WidgetContainer:extend{
+    width = 1,
+    height = 1,
+    bordersize = 1,
+    radius = 0,
+}
+
+function CoverFrame:getSize()
+    return Geom:new{ w = self.width, h = self.height }
+end
+
+function CoverFrame:paintTo(bb, x, y)
+    self.dimen = self.dimen or Geom:new{}
+    self.dimen.x, self.dimen.y = x, y
+    self.dimen.w, self.dimen.h = self.width, self.height
+    bb:paintRoundedRect(x, y, self.width, self.height, Blitbuffer.COLOR_WHITE, self.radius)
+    if self[1] then self[1]:paintTo(bb, x + self.bordersize, y + self.bordersize) end
+    bb:paintBorder(x, y, self.width, self.height, self.bordersize,
+        Blitbuffer.COLOR_BLACK, self.radius, G_reader_settings:nilOrTrue("anti_alias_ui"))
+end
 
 local function safeFace(config)
     local name = config.font
@@ -99,15 +124,11 @@ function Card:_fakeCover(w, h, text, missing, radius, border)
     local inner_h = math.max(1, h - 2 * border)
     local label_w = math.max(1, inner_w - 2 * Screen:scaleBySize(6))
     local label = makeText(missing and (text .. "\n(文件失效)") or text, config, label_w, true)
-    return FrameContainer:new{
+    return CoverFrame:new{
         width = w,
         height = h,
-        padding = 0,
-        margin = 0,
         bordersize = border,
         radius = radius,
-        background = Blitbuffer.COLOR_WHITE,
-        color = missing and Blitbuffer.COLOR_DARK_GRAY or Blitbuffer.COLOR_BLACK,
         CenterContainer:new{ dimen = Geom:new{ w = inner_w, h = inner_h }, label },
     }
 end
@@ -159,14 +180,11 @@ function Card:_build()
     local cached = path and attr and self.menu.cache:get(path, spec) or nil
     local visual
     if cached then
-        visual = FrameContainer:new{
+        visual = CoverFrame:new{
             width = cover_w,
             height = cover_h,
-            padding = 0,
-            margin = 0,
             bordersize = border,
             radius = radius,
-            background = Blitbuffer.COLOR_WHITE,
             ImageWidget:new{ file = cached, width = inner_w, height = inner_h },
         }
         self.menu._has_cover_images = true
@@ -230,6 +248,7 @@ function Card:onFocus() self.underline.color = Blitbuffer.COLOR_BLACK return tru
 function Card:onUnfocus() self.underline.color = Blitbuffer.COLOR_WHITE return true end
 
 local Grid = BookList:extend{
+    name = "bookshelf_grid",
     is_borderless = true,
     is_popout = false,
     covers_fullscreen = true,
