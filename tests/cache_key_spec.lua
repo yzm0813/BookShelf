@@ -19,6 +19,7 @@ local Cache = require("bookshelf_covercache")
 local cache = Cache:new({}, {})
 local base = { w = 120, h = 180, mode = "crop", ratio = "2:3", radius = 8 }
 local key = cache:key("/books/a.epub", base)
+assert(key:match("^2\31"), "render version must invalidate thumbnails from the old border geometry")
 
 local variants = {
     { w = 121, h = 180, mode = "crop", ratio = "2:3", radius = 8 },
@@ -31,4 +32,4 @@ for _, spec in ipairs(variants) do assert(cache:key("/books/a.epub", spec) ~= ke
 mtime = 101
 assert(cache:key("/books/a.epub", base) ~= key, "mtime must invalidate a thumbnail")
 assert(cache:key("/books/b.epub", base) ~= key, "path must be part of the key")
-print("PASS cache_key_spec: 7 invalidation checks")
+print("PASS cache_key_spec: 8 invalidation checks")

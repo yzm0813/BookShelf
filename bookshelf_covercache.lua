@@ -9,6 +9,7 @@ local util = require("util")
 
 local CoverCache = {}
 CoverCache.__index = CoverCache
+local RENDER_VERSION = 2
 
 function CoverCache:new(ui, store)
     local o = setmetatable({}, self)
@@ -20,7 +21,7 @@ end
 
 function CoverCache:key(path, spec)
     local attr = lfs.attributes(path) or {}
-    return table.concat({ path, attr.modification or 0, spec.w, spec.h, spec.mode,
+    return table.concat({ RENDER_VERSION, path, attr.modification or 0, spec.w, spec.h, spec.mode,
         spec.ratio, spec.radius }, "\31")
 end
 

@@ -93,19 +93,22 @@ function Card:_coverDimensions(cover_area_h, metadata)
     return math.max(1, math.floor(w * scale)), math.max(1, math.floor(h * scale))
 end
 
-function Card:_fakeCover(w, h, text, missing)
+function Card:_fakeCover(w, h, text, missing, radius, border)
     local config = self.entry.kind == "category" and self.menu.settings.category or self.menu.settings.title
-    local inner_w = math.max(1, w - 2 * Screen:scaleBySize(6))
-    local label = makeText(missing and (text .. "\n(文件失效)") or text, config, inner_w, true)
+    local inner_w = math.max(1, w - 2 * border)
+    local inner_h = math.max(1, h - 2 * border)
+    local label_w = math.max(1, inner_w - 2 * Screen:scaleBySize(6))
+    local label = makeText(missing and (text .. "\n(文件失效)") or text, config, label_w, true)
     return FrameContainer:new{
         width = w,
         height = h,
-        padding = Screen:scaleBySize(4),
+        padding = 0,
         margin = 0,
-        bordersize = Size.border.thin,
-        radius = Screen:scaleBySize(self.menu.settings.corner_radius),
+        bordersize = border,
+        radius = radius,
+        background = Blitbuffer.COLOR_WHITE,
         color = missing and Blitbuffer.COLOR_DARK_GRAY or Blitbuffer.COLOR_BLACK,
-        CenterContainer:new{ dimen = Geom:new{ w = inner_w, h = math.max(1, h - Screen:scaleBySize(8)) }, label },
+        CenterContainer:new{ dimen = Geom:new{ w = inner_w, h = inner_h }, label },
     }
 end
 
@@ -137,14 +140,22 @@ function Card:_build()
     local attr = path and lfs.attributes(path) or nil
     local metadata = path and self.menu.store:getMetadata(path, attr and attr.modification) or nil
     local title_cfg = category_like and settings.category or settings.title
-    local label_h = textHeight(title_cfg)
-    local author_h = entry.kind == "book" and settings.author.show and textHeight(settings.author) or 0
+    -- Mixed root pages need one geometry model for categories and books.
+    -- Reserve the larger title slot and an author slot for every card so the
+    -- cover tops and text baselines do not move with content or font choice.
+    local title_slot_h = math.max(textHeight(settings.title), textHeight(settings.category))
+    local author_slot_h = settings.author.show and textHeight(settings.author) or 0
     local text_gap = Screen:scaleBySize(2)
-    local cover_area_h = math.max(Screen:scaleBySize(20), self.height - label_h - author_h - 2 * text_gap)
+    local cover_area_h = math.max(Screen:scaleBySize(20),
+        self.height - title_slot_h - author_slot_h - 2 * text_gap)
     local cover_w, cover_h = self:_coverDimensions(cover_area_h, metadata)
     local radius = math.min(Screen:scaleBySize(settings.corner_radius), math.floor(math.min(cover_w, cover_h) / 2))
-    local spec = { w = cover_w, h = cover_h, mode = settings.crop_mode,
-        ratio = settings.cover_ratio, radius = radius }
+    local border = math.max(1, Size.border.thin)
+    local inner_w = math.max(1, cover_w - 2 * border)
+    local inner_h = math.max(1, cover_h - 2 * border)
+    local inner_radius = math.max(0, radius - border)
+    local spec = { w = inner_w, h = inner_h, mode = settings.crop_mode,
+        ratio = settings.cover_ratio, radius = inner_radius }
     local cached = path and attr and self.menu.cache:get(path, spec) or nil
     local visual
     if cached then
@@ -153,15 +164,16 @@ function Card:_build()
             height = cover_h,
             padding = 0,
             margin = 0,
-            bordersize = Size.border.thin,
+            bordersize = border,
             radius = radius,
-            ImageWidget:new{ file = cached, width = cover_w, height = cover_h },
+            background = Blitbuffer.COLOR_WHITE,
+            ImageWidget:new{ file = cached, width = inner_w, height = inner_h },
         }
         self.menu._has_cover_images = true
     else
         visual = self:_fakeCover(cover_w, cover_h,
             category_like and entry.name or (metadata and metadata.title or entry.name),
-            path and not attr)
+            path and not attr, radius, border)
         if path and attr and not (metadata and metadata.cover_missing) then
             self.menu:_queueExtraction(path, spec)
         end
@@ -183,13 +195,23 @@ function Card:_build()
 
     local text_w = math.max(1, self.width - 2 * Screen:scaleBySize(2))
     local group = VerticalGroup:new{ align = "center" }
-    table.insert(group, CenterContainer:new{ dimen = Geom:new{ w = self.width, h = cover_area_h }, cover })
+    table.insert(group, TopContainer:new{
+        dimen = Geom:new{ w = self.width, h = cover_area_h },
+        CenterContainer:new{ dimen = Geom:new{ w = self.width, h = cover_h }, cover },
+    })
     table.insert(group, VerticalSpan:new{ width = text_gap })
     local display_title = category_like and entry.name
         or (metadata and metadata.title or entry.name)
-    table.insert(group, makeText(display_title, title_cfg, text_w, category_like))
-    if entry.kind == "book" and settings.author.show then
-        table.insert(group, makeText(metadata and metadata.authors or "", settings.author, text_w, false))
+    table.insert(group, CenterContainer:new{
+        dimen = Geom:new{ w = self.width, h = title_slot_h },
+        makeText(display_title, title_cfg, text_w, category_like),
+    })
+    if settings.author.show then
+        table.insert(group, CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = author_slot_h },
+            makeText(entry.kind == "book" and metadata and metadata.authors or "",
+                settings.author, text_w, false),
+        })
     end
     return CenterContainer:new{ dimen = self.dimen:copy(), group }
 end

@@ -19,6 +19,12 @@ local Grid = require("bookshelf_grid")
 local Scanner = require("bookshelf_scanner")
 local Store = require("bookshelf_store")
 
+local SIMPLEUI_ACTION_ID = "bookshelf_open"
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local plugin_dir = source_path:match("^(.*)[/\\]main%.lua$")
+    or (DataStorage:getDataDir() .. "/plugins/bookshelf.koplugin")
+local SIMPLEUI_ICON = plugin_dir .. "/icons/bookshelf.svg"
+
 local Bookshelf = WidgetContainer:extend{
     name = "bookshelf",
     is_doc_only = false,
@@ -38,6 +44,7 @@ function Bookshelf:init()
     end
     if not self.ui.document then
         self:_registerFileDialogButton()
+        self:_scheduleSimpleUIRegistration()
         if self.store:getSettings().startup_open and type(self.ui.registerPostInitCallback) == "function" then
             self.ui:registerPostInitCallback(function()
                 UIManager:scheduleIn(0.2, function()
@@ -47,6 +54,50 @@ function Bookshelf:init()
                 end)
             end)
         end
+    end
+end
+
+function Bookshelf:_registerSimpleUIAction()
+    local QA = package.loaded["features/sui_quickactions"]
+    if not QA then
+        local ok, module = pcall(require, "features/sui_quickactions")
+        if ok then QA = module end
+    end
+    if not QA or type(QA.register) ~= "function" then return false end
+    QA.register{
+        id = SIMPLEUI_ACTION_ID,
+        label = _("Bookshelf"),
+        icon = SIMPLEUI_ICON,
+        is_in_place = false,
+        execute = function()
+            local FileManager = package.loaded["apps/filemanager/filemanager"]
+            local live_fm = FileManager and FileManager.instance
+            local plugin = live_fm and live_fm.bookshelf or self
+            if not plugin or plugin._stopped then return end
+            plugin:showRoot()
+        end,
+    }
+    self._simpleui_qa = QA
+    logger.info("Bookshelf: registered Simple UI bottom-bar candidate", SIMPLEUI_ACTION_ID)
+    return true
+end
+
+function Bookshelf:_scheduleSimpleUIRegistration()
+    local function register()
+        if self._stopped or self:_registerSimpleUIAction() then return end
+        -- Simple UI may be initialized after Bookshelf. Retry once after all
+        -- plugin init callbacks without requiring or modifying Simple UI.
+        UIManager:scheduleIn(1, function()
+            if not self._stopped then self:_registerSimpleUIAction() end
+        end)
+    end
+    -- Register immediately when Simple UI is enabled so a previously selected
+    -- bookshelf tab survives Simple UI's startup tab sanitization.
+    if self:_registerSimpleUIAction() then return end
+    if type(self.ui.registerPostInitCallback) == "function" then
+        self.ui:registerPostInitCallback(register)
+    else
+        UIManager:nextTick(register)
     end
 end
 
@@ -97,11 +148,9 @@ function Bookshelf:_rootEntries()
             path = self.store:firstValidBook(category),
         }
     end
-    entries[#entries + 1] = {
-        kind = "uncategorized",
-        name = _("Uncategorized books"),
-        path = self.uncategorized[1],
-    }
+    for _, entry in ipairs(self:_bookEntries(self.uncategorized)) do
+        entries[#entries + 1] = entry
+    end
     return entries
 end
 
@@ -151,12 +200,6 @@ function Bookshelf:showCategory(category_id)
         { kind = "category", category_id = category.id }, true)
 end
 
-function Bookshelf:showUncategorized()
-    self:_scan()
-    return self:_showGrid(_("Uncategorized books"), self:_bookEntries(self.uncategorized),
-        { kind = "uncategorized" }, true)
-end
-
 function Bookshelf:_closeGrid(grid, skip_return)
     if grid then grid._skip_return = skip_return end
     if grid then UIManager:close(grid) end
@@ -166,9 +209,6 @@ function Bookshelf:onGridSelect(grid, entry)
     if entry.kind == "category" then
         self:_closeGrid(grid, true)
         self:showCategory(entry.category_id)
-    elseif entry.kind == "uncategorized" then
-        self:_closeGrid(grid, true)
-        self:showUncategorized()
     elseif entry.kind == "book" then
         if self._opening_book then return end
         if lfs.attributes(entry.path, "mode") ~= "file" then
@@ -215,8 +255,6 @@ function Bookshelf:onGridHold(grid, entry)
     if entry.kind == "category" then
         local category = self.store:getCategory(entry.category_id)
         if category then self:showCategoryActions(grid, category) end
-    elseif entry.kind == "uncategorized" then
-        self:onGridSelect(grid, entry)
     elseif entry.kind == "book" then
         self:showBookActions(grid, entry)
     end
@@ -230,7 +268,9 @@ function Bookshelf:_refreshRoot(grid)
 end
 
 function Bookshelf:_refreshBookGrid(grid)
-    if grid.context.kind == "category" then
+    if grid.context.kind == "root" then
+        return self:_refreshRoot(grid)
+    elseif grid.context.kind == "category" then
         local category = self.store:getCategory(grid.context.category_id)
         grid.item_table = self:_bookEntries(category and category.books or {}, grid.context.category_id)
     else
@@ -552,6 +592,10 @@ end
 
 function Bookshelf:stopPlugin()
     self._stopped = true
+    if self._simpleui_qa and type(self._simpleui_qa.unregister) == "function" then
+        pcall(self._simpleui_qa.unregister, SIMPLEUI_ACTION_ID)
+        self._simpleui_qa = nil
+    end
     if self._file_button_registered and self.ui and type(self.ui.removeFileDialogButtons) == "function" then
         pcall(self.ui.removeFileDialogButtons, self.ui, "bookshelf_add_to_shelf")
         self._file_button_registered = nil
